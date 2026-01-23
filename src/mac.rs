@@ -15,6 +15,7 @@ pub(crate) fn find_symbol(macho: &MachO, sought: &str) -> Option<usize> {
             && sym.0.contains(sought)
         {
             println!("Symbol: {}", sym.0);
+            println!("Type: {}", sym.1.type_str());
             return Some(index);
         }
     }
