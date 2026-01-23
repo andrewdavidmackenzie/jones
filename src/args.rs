@@ -108,10 +108,13 @@ fn parse_examples_args(args: &[String]) -> Result<Vec<PathBuf>, String> {
     }
 
     if binaries.is_empty() {
-        return Err(format!(
-            "No example binaries found in {}. Did you build them?",
+        println!("No example binaries found in {}", target_dir);
+    } else {
+        println!(
+            "Found {} binaries found in {}\n",
+            binaries.len(),
             target_dir
-        ));
+        );
     }
 
     Ok(binaries)

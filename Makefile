@@ -5,3 +5,4 @@ clippy:
 
 run:
 	cargo run -- --examples --debug
+	cargo run -- --examples --release
