@@ -8,8 +8,10 @@ repository = "https://github.com/andrewdavidmackenzie/jones"
 readme = "README.md"
 license = "Apache-2.0"
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[dependencies]
 goblin = "0.10.4"
+gimli = "0.32.3"
+iced-x86 = "1.21"
 
 [dev-dependencies]
 rand = "0.10.0-rc.7"
