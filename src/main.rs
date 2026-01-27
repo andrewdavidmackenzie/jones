@@ -39,6 +39,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .join(binary_name);
 
         let buffer = if dsym_path.exists() {
+            println!("Analysing files in .dSYM bundle:");
             fs::read(dsym_path)?
         } else {
             fs::read(binary_path)?
@@ -56,8 +57,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     match find_symbol_address(&macho, &panic_symbol) {
                         Some((sym_name, target_addr)) => {
                             println!("\tAddress {:x}", target_addr);
-                            println!("\tExamining debug info");
                             if info.has_embedded_dwarf {
+                                println!("\tExamining debug info");
                                 let callers =
                                     find_callers_with_debug_info(&macho, &buffer, target_addr)?;
 
