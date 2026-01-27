@@ -2,7 +2,6 @@
 #![allow(dead_code)] // TODO Just for now
 
 use crate::SymbolTable;
-use goblin::mach::symbols::Symbols;
 use goblin::mach::{Mach, MachO};
 use iced_x86::{Decoder, DecoderOptions, FlowControl};
 use std::io;
@@ -17,6 +16,7 @@ use gimli::{
 use goblin::mach::load_command::CommandVariant;
 use goblin::mach::segment::SectionData;
 use goblin::mach::segment::{Section, Segment};
+use rustc_demangle::demangle;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -104,6 +104,66 @@ pub(crate) fn find_symbol_address(macho: &MachO, name: &str) -> Option<(String, 
     }
     None
 }
+pub(crate) fn get_text_section<'a>(macho: &MachO, buffer: &'a [u8]) -> Option<(u64, &'a [u8])> {
+    for segment in &macho.segments {
+        for (section, section_data) in segment.sections().unwrap() {
+            if section.name().unwrap() == "__text" {
+                let offset = section.offset as usize;
+                let size = section.size as usize;
+                return Some((section.addr, &buffer[offset..offset + size]));
+            }
+        }
+    }
+    None
+}
+
+pub(crate) fn find_containing_function(macho: &MachO, addr: u64) -> Option<String> {
+    let symbols = macho.symbols.as_ref()?;
+
+    // Collect function symbols with their addresses
+    let mut functions: Vec<(u64, &str)> = symbols
+        .iter()
+        .filter_map(|s| s.ok())
+        .filter(|(_, nlist)| nlist.n_value > 0)
+        .map(|(name, nlist)| (nlist.n_value, name))
+        .collect();
+
+    functions.sort_by_key(|(a, _)| *a);
+
+    // Find the function that contains this address
+    let mut containing = None;
+    for (func_addr, name) in &functions {
+        if *func_addr <= addr {
+            containing = Some(*name);
+        } else {
+            break;
+        }
+    }
+
+    containing.map(|name| {
+        let stripped = name.strip_prefix("_").unwrap_or(name);
+        format!("{:#}", demangle(stripped))
+    })
+}
+
+/*
+fn find_containing_function(symbols: &Symbols, addr: u64) -> String {
+    // Find the function symbol with the largest n_value <= addr
+    let mut best: Option<(&str, u64)> = None;
+    for symbol in symbols.iter() {
+        if let Ok((name, nlist)) = symbol {
+            if nlist.is_stab() {
+                continue;
+            }
+            if nlist.n_value <= addr && best.is_none() || nlist.n_value > best.unwrap().1 {
+                best = Some((name, nlist.n_value));
+            }
+        }
+    }
+    best.map(|(n, _)| n.to_string())
+        .unwrap_or_else(|| "???".into())
+}
+ */
 
 /// Find a segment by name
 fn find_segment<'a>(macho: &'a MachO, segment_name: &str) -> Option<&'a Segment<'a>> {
@@ -159,7 +219,8 @@ pub(crate) fn find_callers(macho: &MachO, target_addr: u64) -> Vec<(u64, String)
                         FlowControl::Call | FlowControl::UnconditionalBranch => {
                             if instr.near_branch_target() == target_addr {
                                 // Find which function contains this call
-                                let caller_name = find_containing_function(symbols, instr.ip());
+                                let caller_name =
+                                    find_containing_function(macho, instr.ip()).unwrap();
                                 callers.push((instr.ip(), caller_name));
                             }
                         }
@@ -170,23 +231,6 @@ pub(crate) fn find_callers(macho: &MachO, target_addr: u64) -> Vec<(u64, String)
         }
     }
     callers
-}
-
-fn find_containing_function(symbols: &Symbols, addr: u64) -> String {
-    // Find the function symbol with the largest n_value <= addr
-    let mut best: Option<(&str, u64)> = None;
-    for symbol in symbols.iter() {
-        if let Ok((name, nlist)) = symbol {
-            if nlist.is_stab() {
-                continue;
-            }
-            if nlist.n_value <= addr && best.is_none() || nlist.n_value > best.unwrap().1 {
-                best = Some((name, nlist.n_value));
-            }
-        }
-    }
-    best.map(|(n, _)| n.to_string())
-        .unwrap_or_else(|| "???".into())
 }
 
 /// Load DWARF sections from MachO binary

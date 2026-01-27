@@ -1,17 +1,19 @@
+use crate::args::parse_args;
+use crate::sym::{
+    check_debug_info, find_callers, find_containing_function, find_symbol_address,
+    find_symbol_containing, get_text_section, read_symbols,
+};
+use crate::SymbolTable::MachO;
+use capstone::prelude::*;
+use goblin::mach::Mach;
+use goblin::mach::Mach::{Binary, Fat};
+use rustc_demangle::demangle;
+use std::error::Error;
+use std::fs;
+
 mod args;
 #[cfg(target_os = "macos")]
 mod sym;
-
-use crate::args::parse_args;
-use crate::sym::{
-    check_debug_info, find_callers, find_callers_with_debug_info, find_symbol_address,
-    find_symbol_containing, read_symbols,
-};
-use crate::SymbolTable::MachO;
-use goblin::mach::Mach;
-use goblin::mach::Mach::{Binary, Fat};
-use std::error::Error;
-use std::fs;
 
 pub enum SymbolTable<'a> {
     MachO(Mach<'a>),
@@ -45,18 +47,62 @@ fn main() -> Result<(), Box<dyn Error>> {
         match symbols {
             MachO(Binary(macho)) => {
                 // Find symbols with panic in them
-                if let Some(panic_symbol) = find_symbol_containing(&macho, "foo") {
-                    println!("Found symbol {:?}", panic_symbol);
+                if let Some(panic_symbol) = find_symbol_containing(&macho, "panic") {
+                    println!("Found symbol   {}", panic_symbol);
+
+                    // Strip leading underscore (macOS convention) before demangling
+                    let stripped = panic_symbol.strip_prefix("_").unwrap_or(&panic_symbol);
+                    let demangled = demangle(stripped);
+                    println!("Demangled name {:#}", demangled);
 
                     let info = check_debug_info(&macho);
 
                     // TODO Restrict this to text segments?
                     // Find the target symbol's address
                     match find_symbol_address(&macho, &panic_symbol) {
-                        Some((sym_name, target_addr)) => {
+                        Some((_sym_name, target_addr)) => {
                             println!("\tAddress {:x}", target_addr);
                             if info.has_embedded_dwarf {
                                 println!("\tExamining debug info");
+
+                                // Get the __TEXT,__text section
+                                let (text_addr, text_data) = get_text_section(&macho, &buffer)
+                                    .ok_or("__text section not found")?;
+
+                                // Set up the disassembler (ARM64 for Apple Silicon)
+                                let cs = Capstone::new()
+                                    .arm64()
+                                    .mode(arch::arm64::ArchMode::Arm)
+                                    .build()?;
+
+                                // Disassemble and find calls to target
+                                let instructions = cs.disasm_all(text_data, text_addr)?;
+
+                                for insn in instructions.iter() {
+                                    // Look for BL (branch with link) instructions
+                                    if insn.mnemonic() == Some("bl") {
+                                        if let Some(operand) = insn.op_str() {
+                                            // Parse the target address from operand (e.g., "#0x10000102c")
+                                            let addr_str = operand.trim_start_matches("#0x");
+                                            if let Ok(call_target) =
+                                                u64::from_str_radix(addr_str, 16)
+                                            {
+                                                if call_target == target_addr {
+                                                    let caller = find_containing_function(
+                                                        &macho,
+                                                        insn.address(),
+                                                    );
+                                                    println!(
+                                                        "Call at {:#x} from function: {}",
+                                                        insn.address(),
+                                                        caller.unwrap_or("unknown".to_string())
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                /*
                                 let callers =
                                     find_callers_with_debug_info(&macho, &buffer, target_addr)?;
 
@@ -70,6 +116,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                         caller.source_line.unwrap_or(0)
                                     );
                                 }
+                                 */
                             } else {
                                 println!("\tNo debug info found, looking for callers by address");
                                 let callers = find_callers(&macho, target_addr);
