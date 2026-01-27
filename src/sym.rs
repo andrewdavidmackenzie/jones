@@ -134,6 +134,9 @@ fn find_sections<'a>(macho: &'a MachO, section_name: &str) -> Vec<(Section, Sect
         .collect()
 }
 
+// TODO Note that the address passed in is an n_value or Symbol table offset,
+// which is not necessarily the same as the address of the symbol in memory.
+// How can we fix that?
 pub(crate) fn find_callers(macho: &MachO, target_addr: u64) -> Vec<(u64, String)> {
     let symbols = macho.symbols.as_ref().unwrap();
     let mut callers = Vec::new();

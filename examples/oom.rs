@@ -1,3 +1,7 @@
+fn foo() -> usize {
+    63
+}
+
 fn main() {
-    vec![0; 1 << 63];
+    vec![0; 1 << foo()];
 }

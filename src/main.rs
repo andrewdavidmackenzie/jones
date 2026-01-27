@@ -17,10 +17,6 @@ pub enum SymbolTable<'a> {
     MachO(Mach<'a>),
 }
 
-/* Generate dSYM from binary
-dsymutil ./target/debug/examples/array_access -o ./target/debug/examples/array_access.dSYM 2>&1
-*/
-
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
 
@@ -49,7 +45,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         match symbols {
             MachO(Binary(macho)) => {
                 // Find symbols with panic in them
-                if let Some(panic_symbol) = find_symbol_containing(&macho, "panic") {
+                if let Some(panic_symbol) = find_symbol_containing(&macho, "foo") {
                     println!("Found symbol {:?}", panic_symbol);
 
                     let info = check_debug_info(&macho);

@@ -6,6 +6,7 @@ clippy:
 .PHONY: examples
 examples:
 	cargo build --example array_access
+	dsymutil ./target/debug/examples/array_access -o ./target/debug/examples/array_access.dSYM 2>&1
 	cargo build --example perfect
 	cargo build --example panic
 	cargo build --example oom
