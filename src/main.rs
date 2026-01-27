@@ -43,9 +43,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             let buf = fs::read(&binary_path)?;
             (buf.clone(), buf)
         };
-        let buffer = fs::read(binary_path)?;
 
-        let symbols = read_symbols(&buffer)?;
+        let symbols = read_symbols(&binary_buffer)?;
         match symbols {
             MachO(Binary(macho)) => {
                 // Find symbols with panic in them
@@ -59,7 +58,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     let info = check_debug_info(&macho);
 
-                    // TODO Restrict this to text segments?
                     // Find the target symbol's address
                     match find_symbol_address(&macho, &panic_symbol) {
                         Some((_sym_name, target_addr)) => {
@@ -68,8 +66,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 println!("\tExamining debug info");
 
                                 // Get the __TEXT,__text section
-                                let (text_addr, text_data) = get_text_section(&macho, &buffer)
-                                    .ok_or("__text section not found")?;
+                                let (text_addr, text_data) =
+                                    get_text_section(&macho, &binary_buffer)
+                                        .ok_or("__text section not found")?;
 
                                 // Set up the disassembler (ARM64 for Apple Silicon)
                                 let cs = Capstone::new()
@@ -80,6 +79,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 // Disassemble and find calls to target
                                 let instructions = cs.disasm_all(text_data, text_addr)?;
 
+                                // TODO use find callers
                                 for instruction in instructions.iter() {
                                     // Look for BL (branch with link) instructions
                                     if instruction.mnemonic() == Some("bl")
@@ -104,10 +104,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 }
                             } else {
                                 println!("\tNo debug info found, looking for callers by address");
-                                let callers = find_callers(&macho, &binary_buffer, target_addr);
-                                for (caller_address, caller_name) in callers {
-                                    println!("Caller '{}' at {:x}", caller_name, caller_address,);
-                                }
+                                call_tree(&macho, &binary_buffer, target_addr);
                             }
                         }
                         None => println!("Couldn't find '{}' address", panic_symbol),
@@ -123,4 +120,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+fn call_tree(macho: &goblin::mach::MachO, buffer: &[u8], target_addr: u64) {
+    let callers = find_callers(macho, buffer, target_addr);
+    for (addr, caller) in callers {
+        println!("Call at {:#x} from function: {}", addr, caller);
+        call_tree(macho, buffer, addr);
+    }
 }

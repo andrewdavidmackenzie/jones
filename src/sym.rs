@@ -93,6 +93,7 @@ pub(crate) fn find_symbol_containing(macho: &MachO, substring: &str) -> Option<S
     None
 }
 
+// TODO Restrict this to text segments?
 /// Returns the first symbol found whose name matches `name` exactly, plus the address it is at
 pub(crate) fn find_symbol_address(macho: &MachO, name: &str) -> Option<(String, u64)> {
     let symbols = macho.symbols.as_ref()?;
@@ -118,6 +119,7 @@ pub(crate) fn get_text_section<'a>(macho: &MachO, buffer: &'a [u8]) -> Option<(u
     None
 }
 
+// TODO make this multi-arch or at least for the arch being built on
 pub(crate) fn find_containing_function(macho: &MachO, addr: u64) -> Option<String> {
     let symbols = macho.symbols.as_ref()?;
 
@@ -217,16 +219,16 @@ pub(crate) fn find_callers(macho: &MachO, buffer: &[u8], target_addr: u64) -> Ve
     };
 
     for instruction in instructions.iter() {
-        if instruction.mnemonic() == Some("bl") {
-            if let Some(operand) = instruction.op_str() {
-                let addr_str = operand.trim_start_matches("#0x");
-                if let Ok(call_target) = u64::from_str_radix(addr_str, 16)
-                    && call_target == target_addr
-                {
-                    let caller_name = find_containing_function(macho, instruction.address())
-                        .unwrap_or_else(|| "unknown".to_string());
-                    callers.push((instruction.address(), caller_name));
-                }
+        if instruction.mnemonic() == Some("bl")
+            && let Some(operand) = instruction.op_str()
+        {
+            let addr_str = operand.trim_start_matches("#0x");
+            if let Ok(call_target) = u64::from_str_radix(addr_str, 16)
+                && call_target == target_addr
+            {
+                let caller_name = find_containing_function(macho, instruction.address())
+                    .unwrap_or_else(|| "unknown".to_string());
+                callers.push((instruction.address(), caller_name));
             }
         }
     }
