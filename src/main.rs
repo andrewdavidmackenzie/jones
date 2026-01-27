@@ -53,6 +53,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     println!("Found symbol {:?}", panic_symbol);
 
                     let info = check_debug_info(&macho);
+
+                    // TODO Restrict this to text segments?
                     // Find the target symbol's address
                     match find_symbol_address(&macho, &panic_symbol) {
                         Some((sym_name, target_addr)) => {

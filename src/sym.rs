@@ -55,8 +55,8 @@ pub(crate) fn read_symbols(buffer: &'_ [u8]) -> io::Result<SymbolTable<'_>> {
     })?))
 }
 
-/// Return true if `macho` has a `__DWARF` segment or a debug section in any segment
-pub fn has_dwarf_info(macho: &MachO) -> bool {
+/// Return true if `macho` has a `__DWARF` segment or a section names `__debug_*` in any segment
+pub(crate) fn has_dwarf_info(macho: &MachO) -> bool {
     for segment in macho.segments.iter() {
         if let Ok(name) = segment.name() {
             if name == "__DWARF" {
@@ -79,6 +79,7 @@ pub fn has_dwarf_info(macho: &MachO) -> bool {
     false
 }
 
+/// Returns the first symbol found whose name contains `substring`
 pub(crate) fn find_symbol_containing(macho: &MachO, substring: &str) -> Option<String> {
     let symbols = macho.symbols.as_ref()?;
     for symbol in symbols.iter() {
@@ -91,11 +92,12 @@ pub(crate) fn find_symbol_containing(macho: &MachO, substring: &str) -> Option<S
     None
 }
 
+/// Returns the first symbol found whose name matches `name` exactly, plus the address it is at
 pub(crate) fn find_symbol_address(macho: &MachO, name: &str) -> Option<(String, u64)> {
     let symbols = macho.symbols.as_ref()?;
     for symbol in symbols.iter() {
         if let Ok((sym_name, nlist)) = symbol
-            && sym_name.contains(name)
+            && sym_name == name
         {
             return Some((sym_name.to_string(), nlist.n_value));
         }
@@ -105,7 +107,6 @@ pub(crate) fn find_symbol_address(macho: &MachO, name: &str) -> Option<(String, 
 
 /// Find a segment by name
 fn find_segment<'a>(macho: &'a MachO, segment_name: &str) -> Option<&'a Segment<'a>> {
-    // Look for __DWARF segment or debug sections
     for segment in macho.segments.iter() {
         if let Ok(name) = segment.name() {
             if name == segment_name {
