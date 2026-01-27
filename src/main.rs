@@ -31,17 +31,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("Processing binary {}", binary_path.display());
 
         let binary_name = binary_path.file_stem().unwrap().to_str().unwrap();
+
         let dsym_path = binary_path
             .with_extension("dSYM")
             .join("Contents/Resources/DWARF")
             .join(binary_name);
-
-        let buffer = if dsym_path.exists() {
-            println!("Analysing files in .dSYM bundle:");
-            fs::read(dsym_path)?
+        let (binary_buffer, _debug_buffer) = if dsym_path.exists() {
+            println!("Using .dSYM bundle for debug info");
+            (fs::read(&binary_path)?, fs::read(dsym_path)?)
         } else {
-            fs::read(binary_path)?
+            let buf = fs::read(&binary_path)?;
+            (buf.clone(), buf)
         };
+        let buffer = fs::read(binary_path)?;
 
         let symbols = read_symbols(&buffer)?;
         match symbols {
@@ -78,48 +80,31 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 // Disassemble and find calls to target
                                 let instructions = cs.disasm_all(text_data, text_addr)?;
 
-                                for insn in instructions.iter() {
+                                for instruction in instructions.iter() {
                                     // Look for BL (branch with link) instructions
-                                    if insn.mnemonic() == Some("bl") {
-                                        if let Some(operand) = insn.op_str() {
-                                            // Parse the target address from operand (e.g., "#0x10000102c")
-                                            let addr_str = operand.trim_start_matches("#0x");
-                                            if let Ok(call_target) =
-                                                u64::from_str_radix(addr_str, 16)
-                                            {
-                                                if call_target == target_addr {
-                                                    let caller = find_containing_function(
-                                                        &macho,
-                                                        insn.address(),
-                                                    );
-                                                    println!(
-                                                        "Call at {:#x} from function: {}",
-                                                        insn.address(),
-                                                        caller.unwrap_or("unknown".to_string())
-                                                    );
-                                                }
-                                            }
+                                    if instruction.mnemonic() == Some("bl")
+                                        && let Some(operand) = instruction.op_str()
+                                    {
+                                        // Parse the target address from operand (e.g., "#0x10000102c")
+                                        let addr_str = operand.trim_start_matches("#0x");
+                                        if let Ok(call_target) = u64::from_str_radix(addr_str, 16)
+                                            && call_target == target_addr
+                                        {
+                                            let caller = find_containing_function(
+                                                &macho,
+                                                instruction.address(),
+                                            );
+                                            println!(
+                                                "Call at {:#x} from function: {}",
+                                                instruction.address(),
+                                                caller.unwrap_or("unknown".to_string())
+                                            );
                                         }
                                     }
                                 }
-                                /*
-                                let callers =
-                                    find_callers_with_debug_info(&macho, &buffer, target_addr)?;
-
-                                for caller in callers {
-                                    println!(
-                                        "{} calls {} at {:x} ({}:{})",
-                                        caller.caller.name,
-                                        sym_name,
-                                        caller.call_addr,
-                                        caller.source_file.unwrap_or_default(),
-                                        caller.source_line.unwrap_or(0)
-                                    );
-                                }
-                                 */
                             } else {
                                 println!("\tNo debug info found, looking for callers by address");
-                                let callers = find_callers(&macho, target_addr);
+                                let callers = find_callers(&macho, &binary_buffer, target_addr);
                                 for (caller_address, caller_name) in callers {
                                     println!("Caller '{}' at {:x}", caller_name, caller_address,);
                                 }

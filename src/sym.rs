@@ -6,6 +6,8 @@ use goblin::mach::{Mach, MachO};
 use iced_x86::{Decoder, DecoderOptions, FlowControl};
 use std::io;
 
+use capstone::arch::BuildsCapstone;
+use capstone::{arch, Capstone};
 /// Here's how to use gimli with a MachO binary to get function information and then find call sites
 /// Note that DWARF doesn't directly encode "function A calls
 /// function B" - it provides accurate function boundaries and source locations, which you combine with disassembly.
@@ -19,7 +21,6 @@ use goblin::mach::segment::{Section, Segment};
 use rustc_demangle::demangle;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-
 
 type DwarfReader<'a> = EndianSlice<'a, RunTimeEndian>;
 
@@ -58,19 +59,19 @@ pub(crate) fn read_symbols(buffer: &'_ [u8]) -> io::Result<SymbolTable<'_>> {
 /// Return true if `macho` has a `__DWARF` segment or a section names `__debug_*` in any segment
 pub(crate) fn has_dwarf_info(macho: &MachO) -> bool {
     for segment in macho.segments.iter() {
-        if let Ok(name) = segment.name() {
-            if name == "__DWARF" {
-                return true;
-            }
+        if let Ok(name) = segment.name()
+            && name == "__DWARF"
+        {
+            return true;
         }
 
         // Also check for debug sections in any segment
         if let Ok(sections) = segment.sections() {
             for (section, _) in sections {
-                if let Ok(name) = section.name() {
-                    if name.starts_with("__debug_") {
-                        return true;
-                    }
+                if let Ok(name) = section.name()
+                    && name.starts_with("__debug_")
+                {
+                    return true;
                 }
             }
         }
@@ -121,10 +122,11 @@ pub(crate) fn find_containing_function(macho: &MachO, addr: u64) -> Option<Strin
     let symbols = macho.symbols.as_ref()?;
 
     // Collect function symbols with their addresses
+    // Filter out empty names - goblin may return duplicate entries with empty names
     let mut functions: Vec<(u64, &str)> = symbols
         .iter()
         .filter_map(|s| s.ok())
-        .filter(|(_, nlist)| nlist.n_value > 0)
+        .filter(|(name, nlist)| nlist.n_value > 0 && !name.is_empty())
         .map(|(name, nlist)| (nlist.n_value, name))
         .collect();
 
@@ -168,10 +170,10 @@ fn find_containing_function(symbols: &Symbols, addr: u64) -> String {
 /// Find a segment by name
 fn find_segment<'a>(macho: &'a MachO, segment_name: &str) -> Option<&'a Segment<'a>> {
     for segment in macho.segments.iter() {
-        if let Ok(name) = segment.name() {
-            if name == segment_name {
-                return Some(segment);
-            }
+        if let Ok(name) = segment.name()
+            && name == segment_name
+        {
+            return Some(segment);
         }
     }
     None
@@ -197,39 +199,38 @@ fn find_sections<'a>(macho: &'a MachO, section_name: &str) -> Vec<(Section, Sect
 // TODO Note that the address passed in is an n_value or Symbol table offset,
 // which is not necessarily the same as the address of the symbol in memory.
 // How can we fix that?
-pub(crate) fn find_callers(macho: &MachO, target_addr: u64) -> Vec<(u64, String)> {
-    let symbols = macho.symbols.as_ref().unwrap();
+pub(crate) fn find_callers(macho: &MachO, buffer: &[u8], target_addr: u64) -> Vec<(u64, String)> {
     let mut callers = Vec::new();
 
-    // Find __text section
-    for segment in macho.segments.iter() {
-        for (section, section_data) in segment.sections().unwrap() {
-            if matches!(section.name(), Ok("__text")) {
-                let base_addr = section.addr;
-                let decoder = Decoder::with_ip(
-                    64, // 64-bit mode (or 32 for 32-bit binaries)
-                    section_data,
-                    base_addr,
-                    DecoderOptions::NONE,
-                );
+    let Some((text_addr, text_data)) = get_text_section(macho, buffer) else {
+        return callers;
+    };
 
-                for instr in decoder {
-                    // Check for calls/jumps to the target address
-                    match instr.flow_control() {
-                        FlowControl::Call | FlowControl::UnconditionalBranch => {
-                            if instr.near_branch_target() == target_addr {
-                                // Find which function contains this call
-                                let caller_name =
-                                    find_containing_function(macho, instr.ip()).unwrap();
-                                callers.push((instr.ip(), caller_name));
-                            }
-                        }
-                        _ => {}
-                    }
+    let cs = Capstone::new()
+        .arm64()
+        .mode(arch::arm64::ArchMode::Arm)
+        .build()
+        .expect("Failed to create Capstone disassembler");
+
+    let Ok(instructions) = cs.disasm_all(text_data, text_addr) else {
+        return callers;
+    };
+
+    for instruction in instructions.iter() {
+        if instruction.mnemonic() == Some("bl") {
+            if let Some(operand) = instruction.op_str() {
+                let addr_str = operand.trim_start_matches("#0x");
+                if let Ok(call_target) = u64::from_str_radix(addr_str, 16)
+                    && call_target == target_addr
+                {
+                    let caller_name = find_containing_function(macho, instruction.address())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    callers.push((instruction.address(), caller_name));
                 }
             }
         }
     }
+
     callers
 }
 
@@ -291,10 +292,10 @@ pub fn get_functions_from_dwarf<'a>(
 
         while let Some((_, entry)) = entries.next_dfs()? {
             // Look for function DIEs (DW_TAG_subprogram)
-            if entry.tag() == gimli::DW_TAG_subprogram {
-                if let Some(func) = parse_function_die(&dwarf, &unit, entry)? {
-                    functions.push(func);
-                }
+            if entry.tag() == gimli::DW_TAG_subprogram
+                && let Some(func) = parse_function_die(&dwarf, &unit, entry)?
+            {
+                functions.push(func);
             }
         }
     }
@@ -345,20 +346,18 @@ fn parse_function_die<R: Reader>(
                 _ => {}
             },
             gimli::DW_AT_decl_file => {
-                if let AttributeValue::FileIndex(idx) = attr.value() {
-                    if let Some(line_program) = &unit.line_program {
-                        if let Some(file_entry) = line_program.header().file(idx) {
-                            if let Some(dir) = file_entry.directory(line_program.header()) {
-                                let dir_str = dwarf.attr_string(unit, dir)?;
-                                let file_str = dwarf.attr_string(unit, file_entry.path_name())?;
-                                file = Some(format!(
-                                    "{}/{}",
-                                    dir_str.to_string_lossy()?,
-                                    file_str.to_string_lossy()?
-                                ));
-                            }
-                        }
-                    }
+                if let AttributeValue::FileIndex(idx) = attr.value()
+                    && let Some(line_program) = &unit.line_program
+                    && let Some(file_entry) = line_program.header().file(idx)
+                    && let Some(dir) = file_entry.directory(line_program.header())
+                {
+                    let dir_str = dwarf.attr_string(unit, dir)?;
+                    let file_str = dwarf.attr_string(unit, file_entry.path_name())?;
+                    file = Some(format!(
+                        "{}/{}",
+                        dir_str.to_string_lossy()?,
+                        file_str.to_string_lossy()?
+                    ));
                 }
             }
             gimli::DW_AT_decl_line => {
