@@ -36,6 +36,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             .with_extension("dSYM")
             .join("Contents/Resources/DWARF")
             .join(binary_name);
+
+        // TODO figure out logic of whether to use debug buffer ot binary buffer that has a text
+        // segment where we can look for instructions to find callers.
         let (binary_buffer, _debug_buffer) = if dsym_path.exists() {
             println!("Using .dSYM bundle for debug info");
             (fs::read(&binary_path)?, fs::read(dsym_path)?)
@@ -47,8 +50,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         let symbols = read_symbols(&binary_buffer)?;
         match symbols {
             MachO(Binary(macho)) => {
+                let target_symbol = "sub_foo";
                 // Find symbols with panic in them
-                if let Some(panic_symbol) = find_symbol_containing(&macho, "panic") {
+                if let Some(panic_symbol) = find_symbol_containing(&macho, target_symbol) {
                     println!("Found symbol   {}", panic_symbol);
 
                     // Strip leading underscore (macOS convention) before demangling
@@ -109,6 +113,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                         None => println!("Couldn't find '{}' address", panic_symbol),
                     }
+                } else {
+                    println!("No references to '{}' found", target_symbol);
                 }
             }
             MachO(Fat(multi_arch)) => {
