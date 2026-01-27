@@ -81,13 +81,13 @@ pub(crate) fn has_dwarf_info(macho: &MachO) -> bool {
 }
 
 /// Returns the first symbol found whose name contains `substring`
-pub(crate) fn find_symbol_containing(macho: &MachO, substring: &str) -> Option<String> {
+pub(crate) fn find_symbol_containing(macho: &MachO, substring: &str) -> Option<(String, String)> {
     let symbols = macho.symbols.as_ref()?;
-    for symbol in symbols.iter() {
-        if let Ok((sym_name, nlist)) = symbol
-            && sym_name.contains(substring)
-        {
-            return Some(sym_name.to_string());
+    for (sym_name, _) in symbols.iter().flatten() {
+        let stripped = sym_name.strip_prefix("_").unwrap_or(sym_name);
+        let demangled = format!("{:#}", demangle(stripped));
+        if demangled.contains(substring) {
+            return Some((sym_name.to_string(), demangled));
         }
     }
     None
@@ -121,7 +121,10 @@ pub(crate) fn get_text_section<'a>(macho: &MachO, buffer: &'a [u8]) -> Option<(u
 
 // TODO make this multi-arch or at least for the arch being built on
 /// Returns (function_start_address, demangled_name) for the function containing `addr`
-pub(crate) fn find_containing_function_with_addr(macho: &MachO, addr: u64) -> Option<(u64, String)> {
+pub(crate) fn find_containing_function_with_addr(
+    macho: &MachO,
+    addr: u64,
+) -> Option<(u64, String)> {
     let symbols = macho.symbols.as_ref()?;
 
     // Collect function symbols with their addresses
@@ -241,16 +244,14 @@ pub(crate) fn find_callers(macho: &MachO, buffer: &[u8], target_addr: u64) -> Ve
             let addr_str = operand.trim_start_matches("#0x");
             if let Ok(call_target) = u64::from_str_radix(addr_str, 16)
                 && call_target == target_addr
-            {
-                if let Some((func_addr, func_name)) =
+                && let Some((func_addr, func_name)) =
                     find_containing_function_with_addr(macho, instruction.address())
-                {
-                    callers.push(CallerInfo {
-                        call_site_addr: instruction.address(),
-                        caller_func_addr: func_addr,
-                        caller_name: func_name,
-                    });
-                }
+            {
+                callers.push(CallerInfo {
+                    call_site_addr: instruction.address(),
+                    caller_func_addr: func_addr,
+                    caller_name: func_name,
+                });
             }
         }
     }

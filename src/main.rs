@@ -7,7 +7,6 @@ use crate::SymbolTable::MachO;
 use capstone::prelude::*;
 use goblin::mach::Mach;
 use goblin::mach::Mach::{Binary, Fat};
-use rustc_demangle::demangle;
 use std::error::Error;
 use std::fs;
 
@@ -52,20 +51,17 @@ fn main() -> Result<(), Box<dyn Error>> {
             MachO(Binary(macho)) => {
                 let target_symbol = "sub_foo";
                 // Find symbols with panic in them
-                if let Some(panic_symbol) = find_symbol_containing(&macho, target_symbol) {
-                    println!("Found symbol   {}", panic_symbol);
-
-                    // Strip leading underscore (macOS convention) before demangling
-                    let stripped = panic_symbol.strip_prefix("_").unwrap_or(&panic_symbol);
-                    let demangled = demangle(stripped);
-                    println!("Demangled name {:#}", demangled);
-
+                if let Some((panic_symbol, demangled)) =
+                    find_symbol_containing(&macho, target_symbol)
+                {
                     let info = check_debug_info(&macho);
                     if info.has_embedded_dwarf {
-                        println!("\tExamining debug info");
+                        println!("Examining debug info");
                     } else {
-                        println!("\tNo debug info found, looking for callers by address");
+                        println!("No debug info found, looking for callers by address");
                     }
+
+                    println!("Symbol {demangled}");
 
                     // Find the target symbol's address
                     match find_symbol_address(&macho, &panic_symbol) {
@@ -109,7 +105,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     }
                                 }
                             } else {
-                                call_tree(&macho, &binary_buffer, target_addr);
+                                call_tree(&macho, &binary_buffer, target_addr, 1);
                             }
                         }
                         None => println!("Couldn't find '{}' address", panic_symbol),
@@ -129,11 +125,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn call_tree(macho: &goblin::mach::MachO, buffer: &[u8], target_addr: u64) {
+fn call_tree(macho: &goblin::mach::MachO, buffer: &[u8], target_addr: u64, depth: usize) {
     let callers = find_callers(macho, buffer, target_addr);
+    let indent = "    ".repeat(depth);
     for caller_info in callers {
-        println!("Called from: {}", caller_info.caller_name);
+        println!("{}Called from: {}", indent, caller_info.caller_name);
         // Recurse using the caller's function start address, not the call site
-        call_tree(macho, buffer, caller_info.caller_func_addr);
+        call_tree(macho, buffer, caller_info.caller_func_addr, depth + 1);
     }
 }
