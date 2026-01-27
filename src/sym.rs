@@ -120,7 +120,8 @@ pub(crate) fn get_text_section<'a>(macho: &MachO, buffer: &'a [u8]) -> Option<(u
 }
 
 // TODO make this multi-arch or at least for the arch being built on
-pub(crate) fn find_containing_function(macho: &MachO, addr: u64) -> Option<String> {
+/// Returns (function_start_address, demangled_name) for the function containing `addr`
+pub(crate) fn find_containing_function_with_addr(macho: &MachO, addr: u64) -> Option<(u64, String)> {
     let symbols = macho.symbols.as_ref()?;
 
     // Collect function symbols with their addresses
@@ -135,19 +136,23 @@ pub(crate) fn find_containing_function(macho: &MachO, addr: u64) -> Option<Strin
     functions.sort_by_key(|(a, _)| *a);
 
     // Find the function that contains this address
-    let mut containing = None;
+    let mut containing: Option<(u64, &str)> = None;
     for (func_addr, name) in &functions {
         if *func_addr <= addr {
-            containing = Some(*name);
+            containing = Some((*func_addr, *name));
         } else {
             break;
         }
     }
 
-    containing.map(|name| {
+    containing.map(|(func_addr, name)| {
         let stripped = name.strip_prefix("_").unwrap_or(name);
-        format!("{:#}", demangle(stripped))
+        (func_addr, format!("{:#}", demangle(stripped)))
     })
+}
+
+pub(crate) fn find_containing_function(macho: &MachO, addr: u64) -> Option<String> {
+    find_containing_function_with_addr(macho, addr).map(|(_, name)| name)
 }
 
 /*
@@ -198,10 +203,21 @@ fn find_sections<'a>(macho: &'a MachO, section_name: &str) -> Vec<(Section, Sect
         .collect()
 }
 
+/// Information about a call site
+#[derive(Debug, Clone)]
+pub struct CallerInfo {
+    /// Address of the call instruction (bl)
+    pub call_site_addr: u64,
+    /// Start address of the calling function
+    pub caller_func_addr: u64,
+    /// Demangled name of the calling function
+    pub caller_name: String,
+}
+
 // TODO Note that the address passed in is an n_value or Symbol table offset,
 // which is not necessarily the same as the address of the symbol in memory.
 // How can we fix that?
-pub(crate) fn find_callers(macho: &MachO, buffer: &[u8], target_addr: u64) -> Vec<(u64, String)> {
+pub(crate) fn find_callers(macho: &MachO, buffer: &[u8], target_addr: u64) -> Vec<CallerInfo> {
     let mut callers = Vec::new();
 
     let Some((text_addr, text_data)) = get_text_section(macho, buffer) else {
@@ -226,9 +242,15 @@ pub(crate) fn find_callers(macho: &MachO, buffer: &[u8], target_addr: u64) -> Ve
             if let Ok(call_target) = u64::from_str_radix(addr_str, 16)
                 && call_target == target_addr
             {
-                let caller_name = find_containing_function(macho, instruction.address())
-                    .unwrap_or_else(|| "unknown".to_string());
-                callers.push((instruction.address(), caller_name));
+                if let Some((func_addr, func_name)) =
+                    find_containing_function_with_addr(macho, instruction.address())
+                {
+                    callers.push(CallerInfo {
+                        call_site_addr: instruction.address(),
+                        caller_func_addr: func_addr,
+                        caller_name: func_name,
+                    });
+                }
             }
         }
     }

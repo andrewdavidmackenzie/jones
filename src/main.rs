@@ -61,14 +61,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                     println!("Demangled name {:#}", demangled);
 
                     let info = check_debug_info(&macho);
+                    if info.has_embedded_dwarf {
+                        println!("\tExamining debug info");
+                    } else {
+                        println!("\tNo debug info found, looking for callers by address");
+                    }
 
                     // Find the target symbol's address
                     match find_symbol_address(&macho, &panic_symbol) {
                         Some((_sym_name, target_addr)) => {
-                            println!("\tAddress {:x}", target_addr);
                             if info.has_embedded_dwarf {
-                                println!("\tExamining debug info");
-
                                 // Get the __TEXT,__text section
                                 let (text_addr, text_data) =
                                     get_text_section(&macho, &binary_buffer)
@@ -107,7 +109,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     }
                                 }
                             } else {
-                                println!("\tNo debug info found, looking for callers by address");
                                 call_tree(&macho, &binary_buffer, target_addr);
                             }
                         }
@@ -130,8 +131,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn call_tree(macho: &goblin::mach::MachO, buffer: &[u8], target_addr: u64) {
     let callers = find_callers(macho, buffer, target_addr);
-    for (addr, caller) in callers {
-        println!("Call at {:#x} from function: {}", addr, caller);
-        call_tree(macho, buffer, addr);
+    for caller_info in callers {
+        println!("Called from: {}", caller_info.caller_name);
+        // Recurse using the caller's function start address, not the call site
+        call_tree(macho, buffer, caller_info.caller_func_addr);
     }
 }
