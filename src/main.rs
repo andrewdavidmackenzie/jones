@@ -1,10 +1,8 @@
 use crate::args::parse_args;
 use crate::sym::{
-    check_debug_info, find_callers, find_containing_function, find_symbol_address,
-    find_symbol_containing, get_text_section, read_symbols,
+    check_debug_info, find_callers, find_symbol_address, find_symbol_containing, read_symbols,
 };
 use crate::SymbolTable::MachO;
-use capstone::prelude::*;
 use goblin::mach::Mach;
 use goblin::mach::Mach::{Binary, Fat};
 use std::error::Error;
@@ -38,7 +36,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         // TODO figure out logic of whether to use debug buffer ot binary buffer that has a text
         // segment where we can look for instructions to find callers.
-        let (binary_buffer, _debug_buffer) = if dsym_path.exists() {
+        let (binary_buffer, debug_buffer) = if dsym_path.exists() {
             println!("Using .dSYM bundle for debug info");
             (fs::read(&binary_path)?, fs::read(dsym_path)?)
         } else {
@@ -49,8 +47,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         let symbols = read_symbols(&binary_buffer)?;
         match symbols {
             MachO(Binary(macho)) => {
-                let target_symbol = "sub_foo";
                 // Find symbols with panic in them
+                let target_symbol = "panic";
                 if let Some((panic_symbol, demangled)) =
                     find_symbol_containing(&macho, target_symbol)
                 {
@@ -67,43 +65,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     match find_symbol_address(&macho, &panic_symbol) {
                         Some((_sym_name, target_addr)) => {
                             if info.has_embedded_dwarf {
-                                // Get the __TEXT,__text section
-                                let (text_addr, text_data) =
-                                    get_text_section(&macho, &binary_buffer)
-                                        .ok_or("__text section not found")?;
-
-                                // Set up the disassembler (ARM64 for Apple Silicon)
-                                let cs = Capstone::new()
-                                    .arm64()
-                                    .mode(arch::arm64::ArchMode::Arm)
-                                    .build()?;
-
-                                // Disassemble and find calls to target
-                                let instructions = cs.disasm_all(text_data, text_addr)?;
-
-                                // TODO use find callers
-                                for instruction in instructions.iter() {
-                                    // Look for BL (branch with link) instructions
-                                    if instruction.mnemonic() == Some("bl")
-                                        && let Some(operand) = instruction.op_str()
-                                    {
-                                        // Parse the target address from operand (e.g., "#0x10000102c")
-                                        let addr_str = operand.trim_start_matches("#0x");
-                                        if let Ok(call_target) = u64::from_str_radix(addr_str, 16)
-                                            && call_target == target_addr
-                                        {
-                                            let caller = find_containing_function(
-                                                &macho,
-                                                instruction.address(),
-                                            );
-                                            println!(
-                                                "Call at {:#x} from function: {}",
-                                                instruction.address(),
-                                                caller.unwrap_or("unknown".to_string())
-                                            );
-                                        }
-                                    }
-                                }
+                                call_tree(&macho, &debug_buffer, target_addr, 1);
                             } else {
                                 call_tree(&macho, &binary_buffer, target_addr, 1);
                             }
@@ -125,6 +87,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+// TODO Maybe have a list of internal rust symbols that is used to filter out call tree
+// paths that we are not interested in, as this finds A LOT of paths, some that don't even
+// make it up to main (like signal handling)
+// std::rt::lang_start
+// std::sys::pal::unix::stack_overflow::imp::signal_handler
+// Construct a Graph or DAG that can be filtered, inverted and printed out or drawn (dot?) later?
 fn call_tree(macho: &goblin::mach::MachO, buffer: &[u8], target_addr: u64, depth: usize) {
     let callers = find_callers(macho, buffer, target_addr);
     let indent = "    ".repeat(depth);

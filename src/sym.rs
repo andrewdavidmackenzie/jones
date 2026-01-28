@@ -220,6 +220,7 @@ pub struct CallerInfo {
 // TODO Note that the address passed in is an n_value or Symbol table offset,
 // which is not necessarily the same as the address of the symbol in memory.
 // How can we fix that?
+// TODO using [cfg] have implementations for other architectures
 pub(crate) fn find_callers(macho: &MachO, buffer: &[u8], target_addr: u64) -> Vec<CallerInfo> {
     let mut callers = Vec::new();
 
@@ -238,6 +239,7 @@ pub(crate) fn find_callers(macho: &MachO, buffer: &[u8], target_addr: u64) -> Ve
     };
 
     for instruction in instructions.iter() {
+        // TODO is "bl" the only valid instruction for ARM64?
         if instruction.mnemonic() == Some("bl")
             && let Some(operand) = instruction.op_str()
         {
