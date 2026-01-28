@@ -1,7 +1,6 @@
 #![allow(unused_variables)] // TODO Just for now
 #![allow(dead_code)] // TODO Just for now
 
-use crate::SymbolTable;
 use goblin::mach::{Mach, MachO};
 use iced_x86::{Decoder, DecoderOptions, FlowControl};
 use std::io;
@@ -24,24 +23,35 @@ use std::path::{Path, PathBuf};
 
 type DwarfReader<'a> = EndianSlice<'a, RunTimeEndian>;
 
-/// Function info extracted from DWARF
-#[derive(Debug, Clone)]
+pub enum SymbolTable<'a> {
+    MachO(Mach<'a>),
+}
+
+/// Function info extracted from DWARF of the calling function
+#[derive(Debug, Clone, Default)]
 pub struct FunctionInfo {
+    /// Demangled name of the calling function
     pub name: String,
-    pub low_pc: u64,
-    pub high_pc: u64,
+    /// Start address of the calling function
+    pub start_address: u64,
+    /// End address of the calling function
+    pub end_address: u64,
+    /// Source location of the calling function
     pub file: Option<String>,
+    /// Line number of the calling function
     pub line: Option<u32>,
 }
 
-/// Now combine with disassembly to find callers:
-/// Call site with full debug info
-#[derive(Debug)]
-pub struct CallSite {
+/// Information about a call site
+#[derive(Debug, Clone, Default)]
+pub struct CallerInfo {
     pub caller: FunctionInfo,
-    pub call_addr: u64,
-    pub source_file: Option<String>,
-    pub source_line: Option<u32>,
+    /// Address of the calling instruction
+    pub call_site_addr: u64,
+    /// Source location of the calling instruction
+    pub file: Option<String>,
+    /// Line number of the calling instruction
+    pub line: Option<u32>,
 }
 
 pub struct DebugInfo {
@@ -50,7 +60,7 @@ pub struct DebugInfo {
     pub dwarf_sections: Vec<String>,
 }
 
-pub(crate) fn read_symbols(buffer: &'_ [u8]) -> io::Result<SymbolTable<'_>> {
+pub(crate) fn read_symbols<'a>(buffer: &'a [u8]) -> io::Result<SymbolTable<'a>> {
     Ok(SymbolTable::MachO(Mach::parse(buffer).map_err(|e| {
         io::Error::new(io::ErrorKind::InvalidData, e)
     })?))
@@ -106,10 +116,14 @@ pub(crate) fn find_symbol_address(macho: &MachO, name: &str) -> Option<(String, 
     }
     None
 }
-pub(crate) fn get_text_section<'a>(macho: &MachO, buffer: &'a [u8]) -> Option<(u64, &'a [u8])> {
+fn get_text_section<'a>(macho: &MachO, buffer: &'a [u8]) -> Option<(u64, &'a [u8])> {
+    get_section_by_name(macho, buffer, "__text")
+}
+
+fn get_section_by_name<'a>(macho: &MachO, buffer: &'a [u8], name: &str) -> Option<(u64, &'a [u8])> {
     for segment in &macho.segments {
         for (section, section_data) in segment.sections().unwrap() {
-            if section.name().unwrap() == "__text" {
+            if section.name().unwrap() == name {
                 let offset = section.offset as usize;
                 let size = section.size as usize;
                 return Some((section.addr, &buffer[offset..offset + size]));
@@ -119,7 +133,18 @@ pub(crate) fn get_text_section<'a>(macho: &MachO, buffer: &'a [u8]) -> Option<(u
     None
 }
 
-// TODO make this multi-arch or at least for the arch being built on
+/// Find a segment by name
+fn find_segment<'a>(macho: &'a MachO, segment_name: &str) -> Option<&'a Segment<'a>> {
+    for segment in macho.segments.iter() {
+        if let Ok(name) = segment.name()
+            && name == segment_name
+        {
+            return Some(segment);
+        }
+    }
+    None
+}
+
 /// Returns (function_start_address, demangled_name) for the function containing `addr`
 pub(crate) fn find_containing_function_with_addr(
     macho: &MachO,
@@ -158,37 +183,6 @@ pub(crate) fn find_containing_function(macho: &MachO, addr: u64) -> Option<Strin
     find_containing_function_with_addr(macho, addr).map(|(_, name)| name)
 }
 
-/*
-fn find_containing_function(symbols: &Symbols, addr: u64) -> String {
-    // Find the function symbol with the largest n_value <= addr
-    let mut best: Option<(&str, u64)> = None;
-    for symbol in symbols.iter() {
-        if let Ok((name, nlist)) = symbol {
-            if nlist.is_stab() {
-                continue;
-            }
-            if nlist.n_value <= addr && best.is_none() || nlist.n_value > best.unwrap().1 {
-                best = Some((name, nlist.n_value));
-            }
-        }
-    }
-    best.map(|(n, _)| n.to_string())
-        .unwrap_or_else(|| "???".into())
-}
- */
-
-/// Find a segment by name
-fn find_segment<'a>(macho: &'a MachO, segment_name: &str) -> Option<&'a Segment<'a>> {
-    for segment in macho.segments.iter() {
-        if let Ok(name) = segment.name()
-            && name == segment_name
-        {
-            return Some(segment);
-        }
-    }
-    None
-}
-
 // TODO segments() seems to create copies that it returns, see if we can get references instead
 fn find_sections<'a>(macho: &'a MachO, section_name: &str) -> Vec<(Section, SectionData<'a>)> {
     macho
@@ -206,36 +200,28 @@ fn find_sections<'a>(macho: &'a MachO, section_name: &str) -> Vec<(Section, Sect
         .collect()
 }
 
-/// Information about a call site
-#[derive(Debug, Clone)]
-pub struct CallerInfo {
-    /// Address of the call instruction (bl)
-    pub call_site_addr: u64,
-    /// Start address of the calling function
-    pub caller_func_addr: u64,
-    /// Demangled name of the calling function
-    pub caller_name: String,
-}
-
 // TODO Note that the address passed in is an n_value or Symbol table offset,
 // which is not necessarily the same as the address of the symbol in memory.
 // How can we fix that?
 // TODO using [cfg] have implementations for other architectures
-pub(crate) fn find_callers(macho: &MachO, buffer: &[u8], target_addr: u64) -> Vec<CallerInfo> {
+pub(crate) fn find_callers(
+    macho: &MachO,
+    buffer: &[u8],
+    target_addr: u64,
+) -> Result<Vec<CallerInfo>, Box<dyn std::error::Error>> {
     let mut callers = Vec::new();
 
     let Some((text_addr, text_data)) = get_text_section(macho, buffer) else {
-        return callers;
+        return Ok(callers);
     };
 
     let cs = Capstone::new()
         .arm64()
         .mode(arch::arm64::ArchMode::Arm)
-        .build()
-        .expect("Failed to create Capstone disassembler");
+        .build()?;
 
     let Ok(instructions) = cs.disasm_all(text_data, text_addr) else {
-        return callers;
+        return Ok(callers);
     };
 
     for instruction in instructions.iter() {
@@ -250,15 +236,19 @@ pub(crate) fn find_callers(macho: &MachO, buffer: &[u8], target_addr: u64) -> Ve
                     find_containing_function_with_addr(macho, instruction.address())
             {
                 callers.push(CallerInfo {
+                    caller: FunctionInfo {
+                        name: func_name.clone(),
+                        start_address: func_addr,
+                        ..Default::default()
+                    },
                     call_site_addr: instruction.address(),
-                    caller_func_addr: func_addr,
-                    caller_name: func_name,
+                    ..Default::default()
                 });
             }
         }
     }
 
-    callers
+    Ok(callers)
 }
 
 /// Load DWARF sections from MachO binary
@@ -322,7 +312,7 @@ pub fn get_functions_from_dwarf<'a>(
             if entry.tag() == gimli::DW_TAG_subprogram
                 && let Some(func) = parse_function_die(&dwarf, &unit, entry)?
             {
-                functions.push(func);
+                functions.push(func.clone());
             }
         }
     }
@@ -378,7 +368,7 @@ fn parse_function_die<R: Reader>(
                     && let Some(file_entry) = line_program.header().file(idx)
                     && let Some(dir) = file_entry.directory(line_program.header())
                 {
-                    let dir_str = dwarf.attr_string(unit, dir)?;
+                    let dir_str = dwarf.attr_string(unit, dir.clone())?;
                     let file_str = dwarf.attr_string(unit, file_entry.path_name())?;
                     file = Some(format!(
                         "{}/{}",
@@ -406,8 +396,8 @@ fn parse_function_die<R: Reader>(
     match (name, low_pc, high_pc) {
         (Some(name), Some(low_pc), Some(high_pc)) => Ok(Some(FunctionInfo {
             name,
-            low_pc,
-            high_pc,
+            start_address: low_pc,
+            end_address: high_pc,
             file,
             line,
         })),
@@ -419,21 +409,21 @@ fn parse_function_die<R: Reader>(
 pub fn find_function_at_address(functions: &[FunctionInfo], addr: u64) -> Option<&FunctionInfo> {
     functions
         .iter()
-        .find(|f| addr >= f.low_pc && addr < f.high_pc)
+        .find(|f| addr >= f.start_address && addr < f.end_address)
 }
 
 /// Build address-to-function lookup for efficient queries
 pub fn build_function_lookup(functions: &[FunctionInfo]) -> HashMap<u64, &FunctionInfo> {
     // For quick lookups, you might want an interval tree in production
     // This simple version just maps low_pc to function
-    functions.iter().map(|f| (f.low_pc, f)).collect()
+    functions.iter().map(|f| (f.start_address, f)).collect()
 }
 /// Find all functions that call a target address, with source info
 pub fn find_callers_with_debug_info(
     macho: &MachO,
     buffer: &[u8],
     target_addr: u64,
-) -> Result<Vec<CallSite>, Box<dyn std::error::Error>> {
+) -> Result<Vec<CallerInfo>, Box<dyn std::error::Error>> {
     let functions = get_functions_from_dwarf(macho, buffer)?;
     let dwarf = load_dwarf_sections(macho, buffer)?;
     let mut callers = Vec::new();
@@ -458,11 +448,11 @@ pub fn find_callers_with_debug_info(
                                     // Get source line info for this specific address
                                     let (file, line) = get_source_location(&dwarf, instr.ip())?;
 
-                                    callers.push(CallSite {
+                                    callers.push(CallerInfo {
                                         caller: func.clone(),
-                                        call_addr: instr.ip(),
-                                        source_file: file,
-                                        source_line: line,
+                                        call_site_addr: instr.ip(),
+                                        file,
+                                        line,
                                     });
                                 }
                             }
