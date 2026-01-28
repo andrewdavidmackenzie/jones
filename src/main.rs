@@ -1,8 +1,7 @@
 use crate::args::parse_args;
-use crate::sym::SymbolTable::MachO;
 use crate::sym::{
-    check_debug_info, find_callers, find_callers_with_debug_info, find_symbol_address,
-    find_symbol_containing, read_symbols,
+    find_callers, find_callers_with_debug_info, find_symbol_address, find_symbol_containing, load_debug_info,
+    read_symbols, DebugInfo, SymbolTable,
 };
 use goblin::mach::Mach::{Binary, Fat};
 use std::error::Error;
@@ -23,32 +22,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     for binary_path in binaries {
         println!("Processing {}", binary_path.display());
 
-        let binary_name = binary_path.file_stem().unwrap().to_str().unwrap();
-
-        // TODO handle three (at least cases)
-        // 1) No embedded debug info, no dSYM
-        // 2) No embedded debug info, dSYM
-        // 3) Embedded debug info, no dSYM
-        // 4) Embedded debug info, dSYM
-
         let binary_buffer = fs::read(&binary_path)?;
         let symbols = read_symbols(&binary_buffer)?;
 
-        // Look for dSYM symbol directory
-        let dsym_dir_path = binary_path
-            .with_extension("dSYM")
-            .join("Contents/Resources/DWARF")
-            .join(binary_name);
-        let mut dsym_buffer = vec![];
-        let mut dsym_symbols = None;
-        if dsym_dir_path.exists() {
-            println!("Using .dSYM bundle for debug info");
-            dsym_buffer = fs::read(dsym_dir_path)?;
-            dsym_symbols = Some(read_symbols(&dsym_buffer)?);
-        };
-
         match symbols {
-            MachO(Binary(macho)) => {
+            SymbolTable::MachO(Binary(macho)) => {
                 // Find symbols with panic in them
                 let target_symbol = "panic";
                 if let Some((panic_symbol, demangled)) =
@@ -57,26 +35,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                     // Find the target symbol's address
                     match find_symbol_address(&macho, &panic_symbol) {
                         Some((_sym_name, target_addr)) => {
-                            let info = check_debug_info(&macho);
-
-                            if info.has_embedded_dwarf {
-                                println!("Examining debug info");
-                                println!("Symbol {demangled}");
-                                call_tree(&macho, &binary_buffer, true, target_addr, 1);
-                            } else {
-                                match dsym_symbols {
-                                    Some(MachO(Binary(debug_macho))) => {
-                                        println!("Looking for callers using dSYM debug info");
-                                        println!("Symbol {demangled}");
-                                        call_tree(&debug_macho, &dsym_buffer, true, target_addr, 1);
-                                    }
-                                    _ => {
-                                        println!(
-                                            "No debug info found, looking for callers by address"
-                                        );
-                                        println!("Symbol {demangled}");
-                                        call_tree(&macho, &binary_buffer, false, target_addr, 1);
-                                    }
+                            println!("Symbol {demangled}");
+                            let debug_info = load_debug_info(&macho, &binary_path);
+                            match &debug_info {
+                                DebugInfo::Embedded => {
+                                    call_tree(&macho, &binary_buffer, &debug_info, target_addr, 1);
+                                }
+                                DebugInfo::DSym(_) => {
+                                    call_tree(&macho, &binary_buffer, &debug_info, target_addr, 1);
+                                }
+                                DebugInfo::None => {
+                                    println!("No debug info found, looking for callers by address");
+                                    call_tree(&macho, &binary_buffer, &debug_info, target_addr, 1);
                                 }
                             }
                         }
@@ -86,7 +56,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     println!("No references to '{}' found", target_symbol);
                 }
             }
-            MachO(Fat(multi_arch)) => {
+            SymbolTable::MachO(Fat(multi_arch)) => {
                 println!("FAT: {:?} architectures", multi_arch.arches().unwrap());
             }
         }
@@ -104,29 +74,66 @@ fn main() -> Result<(), Box<dyn Error>> {
 // std::sys::pal::unix::stack_overflow::imp::signal_handler
 // Construct a Graph or DAG that can be filtered, inverted and printed out or drawn (dot?) later?
 fn call_tree(
-    macho: &goblin::mach::MachO,
-    buffer: &[u8],
-    debug: bool,
+    binary_macho: &goblin::mach::MachO,
+    binary_buffer: &[u8],
+    debug_source: &DebugInfo,
     target_addr: u64,
     depth: usize,
 ) {
-    let callers = if debug {
-        find_callers_with_debug_info(macho, buffer, target_addr).unwrap()
-    } else {
-        find_callers(macho, buffer, target_addr).unwrap()
+    let callers = match debug_source {
+        DebugInfo::Embedded => {
+            // Binary and debug are the same
+            find_callers_with_debug_info(
+                binary_macho,
+                binary_buffer,
+                binary_macho,
+                binary_buffer,
+                target_addr,
+            )
+            .unwrap()
+        }
+        DebugInfo::DSym(dsym_info) => {
+            // Binary for code, dSYM for debug info
+            // Use ouroboros-generated accessors to get references
+            dsym_info.with_debug_macho(|debug_macho| {
+                if let goblin::mach::Mach::Binary(macho) = debug_macho {
+                    find_callers_with_debug_info(
+                        binary_macho,
+                        binary_buffer,
+                        macho,
+                        dsym_info.borrow_debug_buffer(),
+                        target_addr,
+                    )
+                    .unwrap()
+                } else {
+                    find_callers(binary_macho, binary_buffer, target_addr).unwrap()
+                }
+            })
+        }
+        DebugInfo::None => {
+            // No debug info, use symbol table only
+            find_callers(binary_macho, binary_buffer, target_addr).unwrap()
+        }
     };
 
     let indent = "    ".repeat(depth);
     for caller_info in callers {
-        println!("{}Called from: {}", indent, caller_info.caller.name);
-        if let Some(filename) = caller_info.file {
-            println!("{}source: {}", indent, filename);
+        match (&caller_info.file, &caller_info.line) {
+            (Some(filename), None) => println!(
+                "{}Called from: '{}' (source: {}",
+                indent, caller_info.caller.name, filename
+            ),
+            (Some(filename), Some(line)) => println!(
+                "{}Called from: '{}' (source: {}:{})",
+                indent, caller_info.caller.name, filename, line
+            ),
+            _ => println!("{}Called from: '{}'", indent, caller_info.caller.name),
         }
         // Recurse using the caller's function start address, not the call site
         call_tree(
-            macho,
-            buffer,
-            debug,
+            binary_macho,
+            binary_buffer,
+            debug_source,
             caller_info.caller.start_address,
             depth + 1,
         );

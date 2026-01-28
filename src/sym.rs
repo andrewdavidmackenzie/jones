@@ -1,10 +1,6 @@
 #![allow(unused_variables)] // TODO Just for now
 #![allow(dead_code)] // TODO Just for now
 
-use goblin::mach::{Mach, MachO};
-use iced_x86::{Decoder, DecoderOptions, FlowControl};
-use std::io;
-
 use capstone::arch::BuildsCapstone;
 use capstone::{arch, Capstone};
 /// Here's how to use gimli with a MachO binary to get function information and then find call sites
@@ -14,12 +10,14 @@ use gimli::{
     AttributeValue, DebuggingInformationEntry, Dwarf, EndianSlice, Reader, RunTimeEndian,
     SectionId, Unit,
 };
-use goblin::mach::load_command::CommandVariant;
 use goblin::mach::segment::SectionData;
 use goblin::mach::segment::{Section, Segment};
+use goblin::mach::{Mach, MachO};
+use ouroboros::self_referencing;
 use rustc_demangle::demangle;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::{fs, io};
 
 type DwarfReader<'a> = EndianSlice<'a, RunTimeEndian>;
 
@@ -54,13 +52,44 @@ pub struct CallerInfo {
     pub line: Option<u32>,
 }
 
-pub struct DebugInfo {
-    pub has_embedded_dwarf: bool,
-    pub uuid: Option<String>,
-    pub dwarf_sections: Vec<String>,
+/// Self-referencing struct that owns the buffer and the parsed MachO that borrows from it
+#[self_referencing]
+pub struct DSymInfo {
+    pub debug_buffer: Vec<u8>,
+    #[borrows(debug_buffer)]
+    #[covariant]
+    pub debug_macho: Mach<'this>,
 }
 
-pub(crate) fn read_symbols<'a>(buffer: &'a [u8]) -> io::Result<SymbolTable<'a>> {
+/// Debug info source - either embedded in binary or from a separate dSYM file/bundle
+pub enum DebugInfo {
+    /// Debug info is embedded in the binary
+    Embedded,
+    /// Debug info is in a separate dSYM bundle
+    DSym(DSymInfo),
+    /// No debug info available
+    None,
+}
+
+impl DebugInfo {
+    /// Returns a reference to the debug MachO if this is a DSym variant
+    pub fn debug_macho(&self) -> Option<&Mach<'_>> {
+        match self {
+            DebugInfo::DSym(info) => Some(info.borrow_debug_macho()),
+            _ => None,
+        }
+    }
+
+    /// Returns a reference to the debug buffer if this is a DSym variant
+    pub fn debug_buffer(&self) -> Option<&[u8]> {
+        match self {
+            DebugInfo::DSym(info) => Some(info.borrow_debug_buffer()),
+            _ => None,
+        }
+    }
+}
+
+pub(crate) fn read_symbols(buffer: &'_ [u8]) -> io::Result<SymbolTable<'_>> {
     Ok(SymbolTable::MachO(Mach::parse(buffer).map_err(|e| {
         io::Error::new(io::ErrorKind::InvalidData, e)
     })?))
@@ -419,46 +448,58 @@ pub fn build_function_lookup(functions: &[FunctionInfo]) -> HashMap<u64, &Functi
     functions.iter().map(|f| (f.start_address, f)).collect()
 }
 /// Find all functions that call a target address, with source info
+///
+/// # Arguments
+/// * `binary_macho` - Parsed MachO from the executable binary (contains __text section)
+/// * `binary_buffer` - Raw bytes of the executable binary
+/// * `debug_macho` - Parsed MachO containing DWARF info (can be same as binary_macho, or from dSYM)
+/// * `debug_buffer` - Raw bytes containing DWARF info (can be same as binary_buffer, or from dSYM)
+/// * `target_addr` - Address of the function to find callers for
 pub fn find_callers_with_debug_info(
-    macho: &MachO,
-    buffer: &[u8],
+    binary_macho: &MachO,
+    binary_buffer: &[u8],
+    debug_macho: &MachO,
+    debug_buffer: &[u8],
     target_addr: u64,
 ) -> Result<Vec<CallerInfo>, Box<dyn std::error::Error>> {
-    let functions = get_functions_from_dwarf(macho, buffer)?;
-    let dwarf = load_dwarf_sections(macho, buffer)?;
+    // Get function info and DWARF from debug info (dSYM or embedded)
+    let functions = get_functions_from_dwarf(debug_macho, debug_buffer)?;
+    let dwarf = load_dwarf_sections(debug_macho, debug_buffer)?;
     let mut callers = Vec::new();
 
-    // Find __text section
-    for segment in macho.segments.iter() {
-        for (section, section_data) in segment.sections()? {
-            if matches!(section.name(), Ok("__text")) {
-                let base_addr = section.addr;
-                let bitness = if macho.is_64 { 64 } else { 32 };
+    // Get __text section from the binary (not dSYM)
+    let Some((text_addr, text_data)) = get_text_section(binary_macho, binary_buffer) else {
+        return Ok(callers);
+    };
 
-                let mut decoder =
-                    Decoder::with_ip(bitness, section_data, base_addr, DecoderOptions::NONE);
+    // Use capstone for ARM64 disassembly
+    let cs = Capstone::new()
+        .arm64()
+        .mode(arch::arm64::ArchMode::Arm)
+        .build()?;
 
-                for instr in &mut decoder {
-                    match instr.flow_control() {
-                        FlowControl::Call | FlowControl::UnconditionalBranch => {
-                            if instr.near_branch_target() == target_addr {
-                                // Find the function containing this call
-                                if let Some(func) = find_function_at_address(&functions, instr.ip())
-                                {
-                                    // Get source line info for this specific address
-                                    let (file, line) = get_source_location(&dwarf, instr.ip())?;
+    let instructions = cs.disasm_all(text_data, text_addr)?;
 
-                                    callers.push(CallerInfo {
-                                        caller: func.clone(),
-                                        call_site_addr: instr.ip(),
-                                        file,
-                                        line,
-                                    });
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
+    for instruction in instructions.iter() {
+        // Look for BL (branch with link) instructions
+        if instruction.mnemonic() == Some("bl")
+            && let Some(operand) = instruction.op_str()
+        {
+            let addr_str = operand.trim_start_matches("#0x");
+            if let Ok(call_target) = u64::from_str_radix(addr_str, 16)
+                && call_target == target_addr
+            {
+                // Find the function containing this call using DWARF info
+                if let Some(func) = find_function_at_address(&functions, instruction.address()) {
+                    // Get source line info for this specific address
+                    let (file, line) = get_source_location(&dwarf, instruction.address())?;
+
+                    callers.push(CallerInfo {
+                        caller: func.clone(),
+                        call_site_addr: instruction.address(),
+                        file,
+                        line,
+                    });
                 }
             }
         }
@@ -522,29 +563,6 @@ pub fn find_dsym(binary_path: &Path) -> Option<PathBuf> {
     None
 }
 
-fn format_uuid(bytes: &[u8; 16]) -> String {
-    format!(
-        "{:02X}{:02X}{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}
-  {:02X}{:02X}",
-        bytes[0],
-        bytes[1],
-        bytes[2],
-        bytes[3],
-        bytes[4],
-        bytes[5],
-        bytes[6],
-        bytes[7],
-        bytes[8],
-        bytes[9],
-        bytes[10],
-        bytes[11],
-        bytes[12],
-        bytes[13],
-        bytes[14],
-        bytes[15]
-    )
-}
-
 /// More detailed check - returns which debug sections are present
 pub fn get_dwarf_sections(macho: &MachO) -> Vec<String> {
     let mut sections = Vec::new();
@@ -563,22 +581,33 @@ pub fn get_dwarf_sections(macho: &MachO) -> Vec<String> {
     sections
 }
 
-pub fn check_debug_info(macho: &MachO) -> DebugInfo {
-    let dwarf_sections = get_dwarf_sections(macho);
-    let has_embedded_dwarf = !dwarf_sections.is_empty();
-
-    // Look for UUID (used to match with external .dSYM)
-    let uuid = macho.load_commands.iter().find_map(|cmd| {
-        if let CommandVariant::Uuid(uuid_cmd) = &cmd.command {
-            Some(format_uuid(&uuid_cmd.uuid))
-        } else {
-            None
+// 1) No embedded debug info, no dSYM
+// 2) No embedded debug info, dSYM
+// 3) Embedded debug info, no dSYM
+// 4) Embedded debug info, dSYM
+pub fn load_debug_info(macho: &MachO, binary_path: &Path) -> DebugInfo {
+    // Look for dSYM symbol directory
+    let binary_name = binary_path.file_stem().unwrap().to_str().unwrap();
+    let dsym_dir_path = binary_path
+        .with_extension("dSYM")
+        .join("Contents/Resources/DWARF")
+        .join(binary_name);
+    if dsym_dir_path.exists() {
+        println!("Using .dSYM bundle for debug info");
+        let debug_buffer = fs::read(dsym_dir_path).unwrap();
+        let dsym_info = DSymInfoBuilder {
+            debug_buffer,
+            debug_macho_builder: |buf: &Vec<u8>| Mach::parse(buf).unwrap(),
         }
-    });
-
-    DebugInfo {
-        has_embedded_dwarf,
-        uuid,
-        dwarf_sections,
+        .build();
+        return DebugInfo::DSym(dsym_info);
     }
+
+    if !get_dwarf_sections(macho).is_empty() {
+        println!("Using embedded DWARF debugging info");
+        return DebugInfo::Embedded;
+    }
+
+    println!("No debug info found");
+    DebugInfo::None
 }

@@ -10,6 +10,7 @@ examples:
 	cargo build --example perfect
 	cargo build --example panic
 	cargo build --example oom
+	dsymutil ./target/debug/examples/oom -o ./target/debug/examples/oom.dSYM 2>&1
 	cargo build --release --example array_access
 	cargo build --release --example perfect
 	cargo build --release --example panic
