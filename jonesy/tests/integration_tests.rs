@@ -599,7 +599,7 @@ fn test_perfect_example() {
     );
     assert!(
         detected.is_empty(),
-        "Perfect example should have no detected panics"
+        "Perfect example should have no detected panics, but found: {detected:?}"
     );
     assert_eq!(
         exit_code, 0,

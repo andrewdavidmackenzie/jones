@@ -8,8 +8,8 @@ fn main() {
     for index in 0..5 {
         // How to index an array without a panic
         match CATCHPHRASES.get(index) {
-            None => println!("Array index out of range of array"), // jonesy:allow(format)
-            Some(phrase) => println!("{phrase}"),                  // jonesy:allow(format)
+            None => println!("Array index out of range of array"), // jonesy:allow(format,capacity)
+            Some(phrase) => println!("{phrase}"),                  // jonesy:allow(format,capacity)
         }
     }
 
@@ -26,16 +26,16 @@ fn demonstrate_inline_allows() {
     // jonesy:allow(unwrap)
     let value = always_some.unwrap();
 
-    // Allow `format` in `println!()` (and oom from internal allocations)
-    // jonesy:allow(format,oom)
+    // Allow `format` and `capacity` in `println!()` (and oom from internal allocations)
+    // jonesy:allow(format,oom,capacity)
     println!("Got value: {value}");
 
-    // Allow `expect` with a descriptive message, and `format` for the message (and oom from allocation)
-    // jonesy:allow(expect,format,oom)
+    // Allow `expect` with a descriptive message, and `format`/`capacity` for the message (and oom from allocation)
+    // jonesy:allow(expect,format,oom,capacity)
     let config = std::env::var("PATH").expect("PATH must be set");
 
-    // Allow `format` in `println!()` (and oom from internal allocations)
-    // jonesy:allow(format,oom)
+    // Allow `format` and `capacity` in `println!()` (and oom from internal allocations)
+    // jonesy:allow(format,oom,capacity)
     println!("PATH length: {}", config.len());
 
     // Allow `oom` on constructing a Vec
@@ -46,8 +46,8 @@ fn demonstrate_inline_allows() {
     // jonesy:allow(unwrap)
     let bytes = data.unwrap();
 
-    // Allow `format` in `println!()` (and oom from internal allocations)
-    // jonesy:allow(bounds,format,oom)
+    // Allow `format` and `capacity` in `println!()` (and oom from internal allocations)
+    // jonesy:allow(bounds,format,oom,capacity)
     println!("First byte: {}", bytes[0]);
 
     // Allow `capacity` inside `len()` (and oom from Vec allocation in args())

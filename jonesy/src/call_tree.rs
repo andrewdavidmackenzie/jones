@@ -470,22 +470,20 @@ pub fn collect_crate_code_points(
     (roots, summary)
 }
 
-/// Assign `Unknown` cause to leaf points that have no identified causes.
-/// A leaf point is one with no children (closest to the panic in the call chain).
-/// This makes it clear that jonesy detected a panic path but couldn't identify the specific cause.
+/// Assign `Unknown` cause to points that have no identified causes.
+/// This ensures every `CrateCodePoint` has at least one cause, making all
+/// points filterable by allow mechanisms (inline comments, config rules).
 ///
-/// Special case: if the leaf is a direct panic (user code directly calls a
+/// Special case: if the point is a direct panic (user code directly calls a
 /// panic-triggering function like `panic_fmt`), assign `ExplicitPanic` instead
 /// of `Unknown`. This handles `panic!("literal")` in Rust 1.78+ where the macro
 /// routes through `panic_fmt` without an intermediate function that
-/// `detect_panic_cause` recognizes.
+/// `detect_panic_cause` recognises.
 fn assign_unknown_causes(points: &mut [CrateCodePoint]) {
     for point in points.iter_mut() {
-        // Recursively process children first
         assign_unknown_causes(&mut point.children);
 
-        // If this is a leaf (no children) with no causes, assign a cause
-        if point.children.is_empty() && point.causes.is_empty() {
+        if point.causes.is_empty() {
             if point.is_direct_panic {
                 point.causes.insert(PanicCause::ExplicitPanic);
             } else {
@@ -498,7 +496,6 @@ fn assign_unknown_causes(points: &mut [CrateCodePoint]) {
 /// Filter out code points whose causes are ALL allowed (not denied) by config or inline comments.
 /// A point is kept if ANY of its causes is denied.
 /// Also removes allowed causes from the causes set so only denied causes are displayed.
-/// If a point has no causes, it's kept (conservative - assume denied).
 ///
 /// The `workspace_root` parameter is used to resolve relative file paths for inline allow checks.
 pub fn filter_allowed_causes(
@@ -511,46 +508,29 @@ pub fn filter_allowed_causes(
     let workspace_root = Some(std::path::Path::new(project_context.project_root()));
 
     points.retain_mut(|point| {
-        // Track if we originally had no causes (conservative - keep these unless inline allowed)
-        let originally_empty = point.causes.is_empty();
-
-        // For points with no causes, check if there's a wildcard inline allow
-        // (points with no cause are otherwise kept conservatively)
-        if originally_empty && check_inline_allow(&point.file, point.line, "*", workspace_root) {
-            // Wildcard inline allow - filter out this point
-            return false;
-        }
-
-        // Remove allowed causes from the set - only keep denied ones
-        // Check both config rules (is_denied_at) and inline comments (check_inline_allow)
         point.causes.retain(|cause| {
             let cause_id = cause.id();
 
-            // First check inline comments - if allowed there, filter it out
             if check_inline_allow(&point.file, point.line, cause_id, workspace_root) {
-                return false; // Not denied (allowed by inline comment)
+                return false;
             }
 
-            // Then check config rules against the containing function
             if !config.is_denied_at(cause, Some(&point.file), Some(&point.name)) {
-                return false; // Allowed by rule on containing function
+                return false;
             }
 
-            // Also check config rules against the called function (for indirect panics)
             if let Some(ref called_fn) = point.called_function {
                 if !config.is_denied_at(cause, Some(&point.file), Some(called_fn)) {
-                    return false; // Allowed by rule on the called function
+                    return false;
                 }
             }
 
-            true // Denied (no rule allows it)
+            true
         });
 
-        // Keep if originally empty (conservative) or if any denied causes remain
-        let should_keep = originally_empty || !point.causes.is_empty();
+        let should_keep = !point.causes.is_empty();
 
         if should_keep {
-            // Recursively filter children
             filter_allowed_causes(&mut point.children, config, project_context);
         }
 
@@ -884,6 +864,73 @@ mod tests {
             points.len(),
             1,
             "Point should be kept - rule doesn't match different called function"
+        );
+    }
+
+    #[test]
+    fn test_assign_unknown_causes_non_leaf() {
+        let mut points = vec![CrateCodePoint {
+            name: "app::run".to_string(),
+            file: "src/main.rs".to_string(),
+            line: 10,
+            column: Some(1),
+            causes: HashSet::new(),
+            children: vec![CrateCodePoint {
+                name: "app::helper".to_string(),
+                file: "src/main.rs".to_string(),
+                line: 20,
+                column: Some(1),
+                causes: HashSet::new(),
+                children: vec![],
+                is_direct_panic: false,
+                called_function: None,
+            }],
+            is_direct_panic: false,
+            called_function: None,
+        }];
+
+        assign_unknown_causes(&mut points);
+
+        assert!(
+            points[0].causes.contains(&PanicCause::Unknown),
+            "Non-leaf point with empty causes should get Unknown assigned"
+        );
+        assert!(
+            points[0].children[0].causes.contains(&PanicCause::Unknown),
+            "Leaf child with empty causes should get Unknown assigned"
+        );
+    }
+
+    #[test]
+    fn test_filter_unknown_cause_with_allow() {
+        use crate::config::Config;
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let toml_path = dir.path().join("jonesy.toml");
+        let mut f = std::fs::File::create(&toml_path).unwrap();
+        writeln!(f, "allow = [\"unknown\"]").unwrap();
+
+        let mut config = Config::with_defaults();
+        config.load_from_jones_toml(&toml_path);
+
+        let mut points = vec![CrateCodePoint {
+            name: "app::run".to_string(),
+            file: "src/main.rs".to_string(),
+            line: 42,
+            column: Some(5),
+            causes: vec![PanicCause::Unknown].into_iter().collect(),
+            children: vec![],
+            is_direct_panic: false,
+            called_function: None,
+        }];
+
+        let ctx = ProjectContext::default();
+        filter_allowed_causes(&mut points, &config, &ctx);
+
+        assert!(
+            points.is_empty(),
+            "Point with Unknown cause should be filtered out by allow = [\"unknown\"]"
         );
     }
 }

@@ -1,4 +1,5 @@
 # Perfect example config - allow certain inherent panics that aren't user bugs
 # format: println!/format! macros can technically panic on write failure
 # oom: memory allocation failures are environmental, not code bugs
-allow = ["format", "oom"]
+# capacity: internal capacity overflow in stdlib I/O and collections
+allow = ["format", "oom", "capacity"]
