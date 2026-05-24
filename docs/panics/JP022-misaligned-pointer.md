@@ -103,7 +103,7 @@ fn get_word(data: &PackedData) -> u32 {
 ## Jonesy Output
 
 ```text
- --> src/lib.rs:4:14 [misaligned pointer dereference]
+ --> src/lib.rs:4:14 [JP022/misaligned_ptr: misaligned_pointer_dereference]
      = help: Ensure pointer alignment requirements are met; review unsafe pointer casts
 ```
 

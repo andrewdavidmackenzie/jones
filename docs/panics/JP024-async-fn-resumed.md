@@ -79,7 +79,7 @@ async fn main() {
 ## Jonesy Output
 
 ```text
- --> src/lib.rs:5:1 [JP024: async function polled after completion]
+ --> src/lib.rs:5:1 [JP024/async_resumed: async_fn_polled_after_completion]
      = help: Ensure futures are not polled after returning Poll::Ready; check executor logic
 ```
 

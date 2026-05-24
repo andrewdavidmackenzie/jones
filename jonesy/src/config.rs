@@ -285,18 +285,13 @@ impl Config {
         true
     }
 
-    /// Validate a cause ID and return whether it's valid.
-    fn is_valid_cause_id(id: &str) -> bool {
-        id == "*" || PanicCause::all_ids().contains(&id)
-    }
-
     /// Apply a TOML configuration, overriding current settings.
     fn apply_toml_config(&mut self, config: &TomlConfig) {
         // Validate and apply the global allow list
         for id in &config.allow {
-            if Self::is_valid_cause_id(id) {
-                self.allowed.insert(id.clone());
-                self.denied.remove(id);
+            if let Some(canonical) = PanicCause::normalise_id(id) {
+                self.allowed.insert(canonical.to_string());
+                self.denied.remove(canonical);
             } else {
                 eprintln!("Warning: Unknown panic cause '{}' in allow list", id);
             }
@@ -304,9 +299,9 @@ impl Config {
 
         // Validate and apply the global deny list
         for id in &config.deny {
-            if Self::is_valid_cause_id(id) {
-                self.denied.insert(id.clone());
-                self.allowed.remove(id);
+            if let Some(canonical) = PanicCause::normalise_id(id) {
+                self.denied.insert(canonical.to_string());
+                self.allowed.remove(canonical);
             } else {
                 eprintln!("Warning: Unknown panic cause '{}' in deny list", id);
             }
@@ -343,17 +338,17 @@ impl Config {
             // rule entirely — the warning was already printed above.
             if !has_path && !has_function {
                 for id in &toml_rule.allow {
-                    if Self::is_valid_cause_id(id) {
-                        self.allowed.insert(id.clone());
-                        self.denied.remove(id);
+                    if let Some(canonical) = PanicCause::normalise_id(id) {
+                        self.allowed.insert(canonical.to_string());
+                        self.denied.remove(canonical);
                     } else {
                         eprintln!("Warning: Unknown panic cause '{}' in allow list", id);
                     }
                 }
                 for id in &toml_rule.deny {
-                    if Self::is_valid_cause_id(id) {
-                        self.denied.insert(id.clone());
-                        self.allowed.remove(id);
+                    if let Some(canonical) = PanicCause::normalise_id(id) {
+                        self.denied.insert(canonical.to_string());
+                        self.allowed.remove(canonical);
                     } else {
                         eprintln!("Warning: Unknown panic cause '{}' in deny list", id);
                     }
@@ -369,8 +364,8 @@ impl Config {
             // Validate and collect allowed causes
             let mut allowed = HashSet::new();
             for id in &toml_rule.allow {
-                if Self::is_valid_cause_id(id) {
-                    allowed.insert(id.clone());
+                if let Some(canonical) = PanicCause::normalise_id(id) {
+                    allowed.insert(canonical.to_string());
                 } else {
                     eprintln!("Warning: Unknown panic cause '{}' in scoped allow list", id);
                 }
@@ -379,8 +374,8 @@ impl Config {
             // Validate and collect denied causes
             let mut denied = HashSet::new();
             for id in &toml_rule.deny {
-                if Self::is_valid_cause_id(id) {
-                    denied.insert(id.clone());
+                if let Some(canonical) = PanicCause::normalise_id(id) {
+                    denied.insert(canonical.to_string());
                 } else {
                     eprintln!("Warning: Unknown panic cause '{}' in scoped deny list", id);
                 }

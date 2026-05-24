@@ -79,7 +79,7 @@ let (head, tail) = data.split_first()?;
 ## Jonesy Output
 
 ```text
- --> src/lib.rs:3:5 [index out of bounds]
+ --> src/lib.rs:3:5 [JP002/bounds: index_out_of_bounds]
      = help: Use .get() for safe access or validate index before use
 ```
 

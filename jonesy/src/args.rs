@@ -235,6 +235,7 @@ fn usage() -> String {
          When run without --bin or --lib, jonesy looks for Cargo.toml in the current\n\
          directory and analyzes all binary targets found in target/debug/.\n\n\
          Subcommands:\n  \
+         causes             List all panic cause codes and valid allow/deny names\n  \
          lsp                Start LSP server for IDE integration\n\n\
          Options:\n  \
          --bin <name>       Analyze only the specified binary (by name or path)\n  \

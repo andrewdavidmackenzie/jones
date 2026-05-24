@@ -53,6 +53,21 @@ struct ExpectedMarker {
     cause: Option<String>,
 }
 
+/// Check if any detected cause matches the expected cause, including parent IDs.
+/// For example, "overflow" matches "div_overflow" and "shift_overflow".
+fn cause_matches(detected_causes: &[String], expected: &str) -> bool {
+    detected_causes.iter().any(|detected| {
+        detected == expected
+            || jonesy::panic_cause::PanicCause::normalise_id(detected)
+                == jonesy::panic_cause::PanicCause::normalise_id(expected)
+            || jonesy::panic_cause::PanicCause::normalise_id(expected) == Some("overflow")
+                && matches!(
+                    detected.as_str(),
+                    "div_overflow" | "rem_overflow" | "shift_overflow" | "overflow"
+                )
+    })
+}
+
 /// Parse expected panic marker locations from source files in a directory
 /// Supports both "// jonesy: expect panic" and "// jonesy: expect panic(cause)"
 fn find_expected_panic_markers(src_dir: &Path) -> Vec<ExpectedMarker> {
@@ -132,9 +147,10 @@ fn has_nearby_marker(detected: &PanicPoint, markers: &[ExpectedMarker]) -> bool 
         }
 
         // If marker specifies a cause, it must be in the detected causes
+        // Also match parent IDs (e.g. "overflow" matches "div_overflow")
         match &marker.cause {
-            Some(expected) => detected.causes.contains(expected),
-            None => true, // No expected cause - any cause OK
+            Some(expected) => cause_matches(&detected.causes, expected),
+            None => true,
         }
     })
 }
@@ -150,10 +166,9 @@ fn has_nearby_detection(marker: &ExpectedMarker, detected: &HashSet<PanicPoint>)
             return false;
         }
 
-        // If marker specifies a cause, it must be in the detected causes
         match &marker.cause {
-            Some(expected) => p.causes.contains(expected),
-            None => true, // No expected cause - any cause OK
+            Some(expected) => cause_matches(&p.causes, expected),
+            None => true,
         }
     })
 }
@@ -346,74 +361,19 @@ fn parse_jones_output(output: &str) -> HashSet<PanicPoint> {
     points
 }
 
-/// Map a cause description (from output) to the cause ID (used in markers)
+/// Extract the cause ID from a formatted cause string.
+/// Input format: "JP003/overflow: arithmetic_overflow"
+/// Extracts the short ID between "/" and ":", or falls back to description after ":".
 fn description_to_cause_id(description: &str) -> String {
-    // Handle exact matches from jonesy output
-    if description.contains("unwrap()") {
-        return "unwrap".to_string();
+    if let Some(slash_pos) = description.find('/') {
+        if let Some(colon_pos) = description.find(':') {
+            return description[slash_pos + 1..colon_pos].trim().to_string();
+        }
     }
-    if description.contains("expect()") {
-        return "expect".to_string();
+    if let Some(colon_pos) = description.find(':') {
+        return description[colon_pos + 1..].trim().to_string();
     }
-    if description.contains("panic!()") {
-        return "panic".to_string();
-    }
-    if description.contains("arithmetic overflow") {
-        return "overflow".to_string();
-    }
-    if description.contains("shift overflow") {
-        return "overflow".to_string();
-    }
-    if description.contains("index out of bounds") {
-        return "bounds".to_string();
-    }
-    if description.contains("division by zero") || description.contains("remainder by zero") {
-        return "div_zero".to_string();
-    }
-    if description.contains("assertion failed") {
-        return "assert".to_string();
-    }
-    if description.contains("unreachable") {
-        return "unreachable".to_string();
-    }
-    if description.contains("unimplemented") {
-        return "unimplemented".to_string();
-    }
-    if description.contains("todo") {
-        return "todo".to_string();
-    }
-    if description.contains("capacity overflow") {
-        return "capacity".to_string();
-    }
-    if description.contains("formatting error") {
-        return "format".to_string();
-    }
-    if description.contains("invalid enum") {
-        return "invalid_enum".to_string();
-    }
-    if description.contains("misaligned pointer") {
-        return "misaligned_ptr".to_string();
-    }
-    if description.contains("panic during drop") || description.contains("panic in drop") {
-        return "drop".to_string();
-    }
-    if description.contains("no-unwind") || description.contains("cannot unwind") {
-        return "unwind".to_string();
-    }
-    if description.contains("out of memory") {
-        return "oom".to_string();
-    }
-    if description.contains("key not found") {
-        return "key_not_found".to_string();
-    }
-    if description.contains("string") && description.contains("slice") {
-        return "str_slice".to_string();
-    }
-    if description.contains("unknown cause") {
-        return "unknown".to_string();
-    }
-    // Fallback: normalize to lowercase with underscores
-    description.to_lowercase().replace(' ', "_")
+    description.to_string()
 }
 
 /// One-time setup initialization
@@ -1178,7 +1138,7 @@ fn test_oom_detection_via_abort() {
     // This should be detected via the abort() entry point
     let oom_detected = stdout
         .lines()
-        .any(|line| line.contains("JP019") || line.contains("out of memory"));
+        .any(|line| line.contains("JP019") || line.contains("out_of_memory"));
 
     assert!(
         oom_detected,
@@ -1671,9 +1631,9 @@ fn test_async_fn_resumed_detection() {
     );
 
     // The async function `cause_async_fn_resumed` should be detected with JP024
-    let has_async_detection = stdout.lines().any(|line| {
-        line.contains("JP024") && line.contains("async function polled after completion")
-    });
+    let has_async_detection = stdout
+        .lines()
+        .any(|line| line.contains("JP024") && line.contains("async_fn_polled_after_completion"));
 
     assert!(
         has_async_detection,

@@ -258,7 +258,7 @@ The JSON output includes a versioned schema for compatibility:
         {
           "code": "JP006",
           "type": "unwrap",
-          "description": "unwrap() on None",
+          "description": "unwrap_failed",
           "docs_url": "https://jonesy.mackenzie-serres.net/panics/JP006-unwrap-none",
           "suggestion": "Use if let, match, unwrap_or, or ? operator instead"
         }
@@ -269,6 +269,8 @@ The JSON output includes a versioned schema for compatibility:
 ```
 
 Each panic point may have multiple causes when different panic paths converge at the same location.
+
+**Note**: The `description` field now uses underscore-separated identifiers (e.g., `unwrap_failed` instead of `unwrap() on None`). These identifiers are also valid as allow/deny names in configuration.
 
 The `--tree` and `--summary-only` flags work with JSON output:
 
@@ -371,6 +373,8 @@ Configuration is loaded in order of precedence (later overrides earlier):
 | `misaligned_ptr`| Misaligned pointer dereference            | denied      | — |
 | `async_resumed` | Async function polled after completion    | denied      | — |
 | `unknown`       | Unknown panic cause                       | denied      | — |
+
+The `ID` column values are also valid as `description` names in the new output format (e.g., `[JP006/unwrap: unwrap_failed]`), and can be used in allow/deny configuration rules.
 
 Clippy lints are "restriction" lints (off by default). Enable in `Cargo.toml`:
 
@@ -653,12 +657,12 @@ Processing /path/to/target/debug/my-app
 Using .dSYM bundle for debug info
 
 Panic code points in crate:
- --> /path/to/src/main.rs:9:1 [explicit panic!() call]
+ --> /path/to/src/main.rs:9:1 [JP001/panic: explicit_panic]
      = help: Review if panic is intentional or add error handling
  --> /path/to/src/main.rs:13:1
      └──  --> /path/to/src/module/mod.rs:3:1
  --> /path/to/src/main.rs:16:1
-     └──  --> /path/to/src/module/mod.rs:7:1 [unwrap() on None]
+     └──  --> /path/to/src/module/mod.rs:7:1 [JP006/unwrap: unwrap_failed]
           = help: Use if let, match, unwrap_or, or ? operator instead
 
 Summary:
@@ -692,7 +696,7 @@ let value = some_option.unwrap();  // Direct call to unwrap()
 ```
 
 ```
---> src/main.rs:42:1 [JP006: unwrap() on None]
+--> src/main.rs:42:1 [JP006/unwrap: unwrap_failed]
     = help: Use if let, match, unwrap_or, or ? operator instead
 ```
 
@@ -704,7 +708,7 @@ builder.filter_level(level).init();  // init() internally calls unwrap()
 ```
 
 ```
---> src/main.rs:70:1 [JP007: unwrap() on Err]
+--> src/main.rs:70:1 [JP006/unwrap: unwrap_failed]
     = help: This calls a function that may call unwrap(). Consider a fallible alternative (e.g., try_*)
 ```
 

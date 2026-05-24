@@ -68,11 +68,11 @@ let db_url = std::env::var("DATABASE_URL")
 ## Jonesy Output
 
 ```text
- --> src/lib.rs:5:10 [expect() on None]
+ --> src/lib.rs:5:10 [JP008/expect: expect_failed]
      = help: Use if let, match, unwrap_or, or ? operator instead
 ```
 
 ## Related
 
 - [JP006 - Unwrap None](/panics/JP006-unwrap-none): `unwrap()` without message
-- [JP009 - Expect Err](/panics/JP009-expect-err): `expect()` on `Result::Err`
+- [JP008 - Expect Err](/panics/JP009-expect-err): `expect()` on `Result::Err` (previously JP009)

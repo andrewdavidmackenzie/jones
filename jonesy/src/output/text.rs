@@ -508,11 +508,11 @@ fn get_sorted_causes(causes: &std::collections::HashSet<PanicCause>) -> Vec<&Pan
     sorted
 }
 
-/// Format all causes as a string, e.g., "[JP001: explicit panic!() call] [JP006: unwrap() failed]"
+/// Format all causes as a string, e.g., "[JP001/panic: explicit_panic] [JP006/unwrap: unwrap_failed]"
 fn format_causes(causes: &[&PanicCause]) -> String {
     causes
         .iter()
-        .map(|c| format!("[{}: {}]", c.error_code(), c.description()))
+        .map(|c| format!("[{}/{}: {}]", c.error_code(), c.id(), c.description()))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -689,7 +689,7 @@ mod tests {
         let cause = PanicCause::Unwrap;
         let causes = vec![&cause];
         let formatted = format_causes(&causes);
-        assert_eq!(formatted, "[JP006: unwrap() failed]");
+        assert_eq!(formatted, "[JP006/unwrap: unwrap_failed]");
     }
 
     #[test]
@@ -700,7 +700,7 @@ mod tests {
         let formatted = format_causes(&causes);
         assert_eq!(
             formatted,
-            "[JP001: explicit panic!() call] [JP002: index out of bounds]"
+            "[JP001/panic: explicit_panic] [JP002/bounds: index_out_of_bounds]"
         );
     }
 
@@ -752,7 +752,7 @@ mod tests {
 
         assert!(output_str.contains("Panic code points in crate"));
         assert!(output_str.contains("src/main.rs:42:5"));
-        assert!(output_str.contains("[JP006: unwrap() failed]"));
+        assert!(output_str.contains("[JP006/unwrap: unwrap_failed]"));
         assert!(output_str.contains("= help:"));
     }
 
@@ -785,7 +785,7 @@ mod tests {
 
         assert!(output_str.contains("src/main.rs:10:1"));
         assert!(output_str.contains("src/lib.rs:20:1"));
-        assert!(output_str.contains("[JP002: index out of bounds]"));
+        assert!(output_str.contains("[JP002/bounds: index_out_of_bounds]"));
     }
 
     #[test]
@@ -800,7 +800,7 @@ mod tests {
         write_text_output(&mut output, &result, false, false, true, false).unwrap();
         let output_str = String::from_utf8(output).unwrap();
 
-        assert!(output_str.contains("[JP003: arithmetic overflow]"));
+        assert!(output_str.contains("[JP003/overflow: arithmetic_overflow]"));
         assert!(output_str.contains("= warning:"));
         assert!(output_str.contains("overflow-checks"));
     }
@@ -825,8 +825,8 @@ mod tests {
         let output_str = String::from_utf8(output).unwrap();
 
         // Both causes should appear, sorted by error code
-        assert!(output_str.contains("[JP002: index out of bounds]"));
-        assert!(output_str.contains("[JP006: unwrap() failed]"));
+        assert!(output_str.contains("[JP002/bounds: index_out_of_bounds]"));
+        assert!(output_str.contains("[JP006/unwrap: unwrap_failed]"));
     }
 
     #[test]
@@ -857,8 +857,8 @@ mod tests {
         assert!(output_str.contains("main.rs"));
         assert!(output_str.contains("lib.rs"));
         // Causes should be present
-        assert!(output_str.contains("[JP014: todo!() reached]"));
-        assert!(output_str.contains("[JP012: unreachable!() reached]"));
+        assert!(output_str.contains("[JP014/todo: todo_reached]"));
+        assert!(output_str.contains("[JP012/unreachable: unreachable_reached]"));
     }
 
     #[test]
@@ -918,7 +918,7 @@ mod tests {
             "Expected child.rs in output:\n{}",
             output_str
         );
-        assert!(output_str.contains("[JP001: explicit panic!() call]"));
+        assert!(output_str.contains("[JP001/panic: explicit_panic]"));
     }
 
     #[test]
@@ -999,7 +999,7 @@ mod tests {
         assert!(output_str.contains("top.rs"));
         assert!(output_str.contains("middle.rs"));
         assert!(output_str.contains("deep.rs"));
-        assert!(output_str.contains("[JP014: todo!() reached]"));
+        assert!(output_str.contains("[JP014/todo: todo_reached]"));
     }
 
     #[test]
@@ -1075,9 +1075,9 @@ mod tests {
             &PanicCause::ExplicitPanic,
         ];
         let result = format_causes(&causes);
-        assert!(result.contains("[JP001:"));
-        assert!(result.contains("[JP002:"));
-        assert!(result.contains("[JP006:"));
+        assert!(result.contains("[JP001/panic:"));
+        assert!(result.contains("[JP002/bounds:"));
+        assert!(result.contains("[JP006/unwrap:"));
     }
 
     #[test]

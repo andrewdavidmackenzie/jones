@@ -27,6 +27,11 @@ use std::path::PathBuf;
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
 
+    if args.get(1).is_some_and(|a| a == "causes") {
+        jonesy::panic_cause::print_causes_table();
+        return Ok(());
+    }
+
     let parsed_args = parse_args(&args).unwrap_or_else(|e| {
         eprintln!("Error: {}", e);
         std::process::exit(255);

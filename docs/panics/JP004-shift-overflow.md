@@ -1,9 +1,11 @@
 ---
 layout: default
-title: "JP004: Shift Overflow"
+title: "JP003: Shift Overflow"
 ---
 
-# JP004: Shift Overflow
+# JP003: Shift Overflow
+
+> **Note**: Shift overflow was previously JP004. It is now part of the JP003 overflow family, reported as `[JP003/overflow: shift_overflow]`.
 
 **Severity**: Medium
 **Category**: Numeric Operations
@@ -18,7 +20,7 @@ A bit shift operation (`<<` or `>>`) where the shift amount is greater than or e
 
 ```rust
 fn shift_left(x: u32, amount: u32) -> u32 {
-    x << amount  // JP004: panics if amount >= 32
+    x << amount  // JP003: panics if amount >= 32
 }
 
 fn main() {
@@ -67,7 +69,7 @@ let (result, overflow) = x.overflowing_shl(amount);
 ## Jonesy Output
 
 ```text
- --> src/lib.rs:3:5 [shift overflow]
+ --> src/lib.rs:3:5 [JP003/overflow: shift_overflow]
      = help: Validate shift amount is within valid range
      = warning: With default release settings (overflow-checks=false), this wraps silently
 ```

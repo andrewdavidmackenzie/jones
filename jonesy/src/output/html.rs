@@ -296,10 +296,11 @@ fn render_panic_point(
     // Show all causes as badges
     for c in &sorted_causes {
         html.push_str(&format!(
-            "{}        <a href=\"{}\" class=\"cause-badge\" target=\"_blank\" rel=\"noopener\">{}: {}</a>\n",
+            "{}        <a href=\"{}\" class=\"cause-badge\" target=\"_blank\" rel=\"noopener\">{}/{}: {}</a>\n",
             indent,
             escape_html(&c.docs_url()),
             escape_html(c.error_code()),
+            escape_html(c.id()),
             escape_html(c.description())
         ));
     }
@@ -377,10 +378,11 @@ fn render_child_point(html: &mut String, point: &CrateCodePoint, project_root: &
     // Show all causes as badges
     for c in &sorted_causes {
         html.push_str(&format!(
-            "{}        <a href=\"{}\" class=\"cause-badge\" target=\"_blank\" rel=\"noopener\">{}: {}</a>\n",
+            "{}        <a href=\"{}\" class=\"cause-badge\" target=\"_blank\" rel=\"noopener\">{}/{}: {}</a>\n",
             indent,
             escape_html(&c.docs_url()),
             escape_html(c.error_code()),
+            escape_html(c.id()),
             escape_html(c.description())
         ));
     }
@@ -810,7 +812,7 @@ mod tests {
         assert!(html.contains(":42:"));
         assert!(html.contains("test_func"));
         assert!(html.contains("JP006"));
-        assert!(html.contains("unwrap() failed"));
+        assert!(html.contains("unwrap_failed"));
     }
 
     #[test]
@@ -905,7 +907,7 @@ mod tests {
         assert!(html.contains("Workspace Members"));
         assert!(html.contains("crate_a"));
         assert!(html.contains("JP014"));
-        assert!(html.contains("todo!()"));
+        assert!(html.contains("todo_reached"));
     }
 
     #[test]

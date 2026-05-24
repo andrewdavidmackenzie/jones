@@ -79,6 +79,42 @@ pub enum PanicCause {
 }
 
 impl PanicCause {
+    /// Normalise any valid allow/deny name to its canonical short ID.
+    /// Accepts short IDs (e.g. "overflow"), description names (e.g. "arithmetic_overflow"),
+    /// and JP error codes (e.g. "JP003"). Returns None for unrecognised names.
+    pub fn normalise_id(name: &str) -> Option<&'static str> {
+        match name {
+            // Wildcards pass through
+            "*" => Some("*"),
+            // Short IDs → themselves
+            "panic" | "explicit_panic" | "JP001" => Some("panic"),
+            "bounds" | "index_out_of_bounds" | "JP002" => Some("bounds"),
+            "overflow" | "arithmetic_overflow" | "JP003" => Some("overflow"),
+            "div_overflow" => Some("div_overflow"),
+            "rem_overflow" => Some("rem_overflow"),
+            "shift_overflow" => Some("shift_overflow"),
+            "div_zero" | "division_by_zero" | "JP005" => Some("div_zero"),
+            "unwrap" | "unwrap_failed" | "JP006" => Some("unwrap"),
+            "expect" | "expect_failed" | "JP008" => Some("expect"),
+            "assert" | "assertion_failed" | "JP010" => Some("assert"),
+            "unreachable" | "unreachable_reached" | "JP012" => Some("unreachable"),
+            "unimplemented" | "unimplemented_reached" | "JP013" => Some("unimplemented"),
+            "todo" | "todo_reached" | "JP014" => Some("todo"),
+            "drop" | "panic_during_drop" | "JP015" => Some("drop"),
+            "unwind" | "panic_in_no_unwind_context" | "JP016" => Some("unwind"),
+            "format" | "formatting_error" | "JP017" => Some("format"),
+            "capacity" | "capacity_overflow" | "JP018" => Some("capacity"),
+            "oom" | "out_of_memory" | "JP019" => Some("oom"),
+            "str_slice" | "string_slice_error" | "JP020" => Some("str_slice"),
+            "invalid_enum" | "invalid_enum_discriminant" | "JP021" => Some("invalid_enum"),
+            "misaligned_ptr" | "misaligned_pointer_dereference" | "JP022" => Some("misaligned_ptr"),
+            "key_not_found" | "key_not_found_in_map" | "JP023" => Some("key_not_found"),
+            "async_resumed" | "async_fn_polled_after_completion" | "JP024" => Some("async_resumed"),
+            "unknown" | "unknown_cause" | "JP000" => Some("unknown"),
+            _ => None,
+        }
+    }
+
     /// Get the configuration identifier for this panic cause.
     /// Used in allow/deny configuration files.
     ///
@@ -130,15 +166,17 @@ impl PanicCause {
         }
     }
 
-    /// Get all valid configuration identifiers
+    /// Get all valid configuration identifiers.
+    /// Includes short IDs, description names, and JP error codes.
     pub fn all_ids() -> &'static [&'static str] {
         &[
+            // Short IDs
             "panic",
             "bounds",
-            "overflow",       // matches all arithmetic overflow
-            "div_overflow",   // division overflow specifically
-            "rem_overflow",   // remainder overflow specifically
-            "shift_overflow", // shift overflow specifically
+            "overflow",
+            "div_overflow",
+            "rem_overflow",
+            "shift_overflow",
             "div_zero",
             "unwrap",
             "expect",
@@ -157,34 +195,83 @@ impl PanicCause {
             "key_not_found",
             "async_resumed",
             "unknown",
+            // Description names (also valid as allow/deny values)
+            "explicit_panic",
+            "index_out_of_bounds",
+            "arithmetic_overflow",
+            "division_by_zero",
+            "unwrap_failed",
+            "expect_failed",
+            "assertion_failed",
+            "unreachable_reached",
+            "unimplemented_reached",
+            "todo_reached",
+            "panic_during_drop",
+            "panic_in_no_unwind_context",
+            "formatting_error",
+            "capacity_overflow",
+            "out_of_memory",
+            "string_slice_error",
+            "invalid_enum_discriminant",
+            "misaligned_pointer_dereference",
+            "key_not_found_in_map",
+            "async_fn_polled_after_completion",
+            "unknown_cause",
+            // JP error codes
+            "JP000",
+            "JP001",
+            "JP002",
+            "JP003",
+            "JP005",
+            "JP006",
+            "JP008",
+            "JP010",
+            "JP012",
+            "JP013",
+            "JP014",
+            "JP015",
+            "JP016",
+            "JP017",
+            "JP018",
+            "JP019",
+            "JP020",
+            "JP021",
+            "JP022",
+            "JP023",
+            "JP024",
         ]
     }
 
-    /// Get a short description of the panic cause
+    /// Get a short description of the panic cause.
+    /// These are also valid allow/deny names in configuration and inline comments.
     pub fn description(&self) -> &'static str {
         match self {
-            PanicCause::ExplicitPanic => "explicit panic!() call",
-            PanicCause::BoundsCheck => "index out of bounds",
-            PanicCause::ArithmeticOverflow(_) => "arithmetic overflow",
-            PanicCause::ShiftOverflow(_) => "shift overflow",
-            PanicCause::DivisionByZero => "division by zero",
-            PanicCause::Unwrap => "unwrap() failed",
-            PanicCause::Expect => "expect() failed",
-            PanicCause::AssertFailed => "assertion failed",
-            PanicCause::Unreachable => "unreachable!() reached",
-            PanicCause::Unimplemented => "unimplemented!() reached",
-            PanicCause::Todo => "todo!() reached",
-            PanicCause::PanicInDrop => "panic during drop",
-            PanicCause::CannotUnwind => "panic in no-unwind context",
-            PanicCause::FormattingError => "formatting error",
-            PanicCause::CapacityOverflow => "capacity overflow",
-            PanicCause::OutOfMemory => "out of memory",
-            PanicCause::StringSliceError => "string/slice error",
-            PanicCause::InvalidEnum => "invalid enum discriminant",
-            PanicCause::MisalignedPointer => "misaligned pointer dereference",
-            PanicCause::KeyNotFound => "key not found in map",
-            PanicCause::AsyncFnResumed => "async function polled after completion",
-            PanicCause::Unknown => "unknown cause",
+            PanicCause::ExplicitPanic => "explicit_panic",
+            PanicCause::BoundsCheck => "index_out_of_bounds",
+            PanicCause::ArithmeticOverflow(op) => match *op {
+                "division" => "div_overflow",
+                "remainder" => "rem_overflow",
+                _ => "arithmetic_overflow",
+            },
+            PanicCause::ShiftOverflow(_) => "shift_overflow",
+            PanicCause::DivisionByZero => "division_by_zero",
+            PanicCause::Unwrap => "unwrap_failed",
+            PanicCause::Expect => "expect_failed",
+            PanicCause::AssertFailed => "assertion_failed",
+            PanicCause::Unreachable => "unreachable_reached",
+            PanicCause::Unimplemented => "unimplemented_reached",
+            PanicCause::Todo => "todo_reached",
+            PanicCause::PanicInDrop => "panic_during_drop",
+            PanicCause::CannotUnwind => "panic_in_no_unwind_context",
+            PanicCause::FormattingError => "formatting_error",
+            PanicCause::CapacityOverflow => "capacity_overflow",
+            PanicCause::OutOfMemory => "out_of_memory",
+            PanicCause::StringSliceError => "string_slice_error",
+            PanicCause::InvalidEnum => "invalid_enum_discriminant",
+            PanicCause::MisalignedPointer => "misaligned_pointer_dereference",
+            PanicCause::KeyNotFound => "key_not_found_in_map",
+            PanicCause::AsyncFnResumed => "async_fn_polled_after_completion",
+            PanicCause::Unknown => "unknown_cause",
         }
     }
 
@@ -420,7 +507,7 @@ impl PanicCause {
             PanicCause::ExplicitPanic => "JP001",
             PanicCause::BoundsCheck => "JP002",
             PanicCause::ArithmeticOverflow(_) => "JP003",
-            PanicCause::ShiftOverflow(_) => "JP004",
+            PanicCause::ShiftOverflow(_) => "JP003",
             PanicCause::DivisionByZero => "JP005",
             PanicCause::Unwrap => "JP006",
             PanicCause::Expect => "JP008",
@@ -449,7 +536,7 @@ impl PanicCause {
             PanicCause::ExplicitPanic => "JP001-explicit-panic",
             PanicCause::BoundsCheck => "JP002-bounds-check",
             PanicCause::ArithmeticOverflow(_) => "JP003-arithmetic-overflow",
-            PanicCause::ShiftOverflow(_) => "JP004-shift-overflow",
+            PanicCause::ShiftOverflow(_) => "JP003-arithmetic-overflow",
             PanicCause::DivisionByZero => "JP005-division-by-zero",
             PanicCause::Unwrap => "JP006-unwrap",
             PanicCause::Expect => "JP008-expect",
@@ -531,6 +618,56 @@ impl PanicCause {
     }
 }
 
+/// Print a table of all panic causes with their codes, IDs, and valid allow names.
+pub fn print_causes_table() {
+    let causes: Vec<PanicCause> = vec![
+        PanicCause::Unknown,
+        PanicCause::ExplicitPanic,
+        PanicCause::BoundsCheck,
+        PanicCause::ArithmeticOverflow("addition"),
+        PanicCause::ArithmeticOverflow("division"),
+        PanicCause::ArithmeticOverflow("remainder"),
+        PanicCause::ShiftOverflow("left"),
+        PanicCause::DivisionByZero,
+        PanicCause::Unwrap,
+        PanicCause::Expect,
+        PanicCause::AssertFailed,
+        PanicCause::Unreachable,
+        PanicCause::Unimplemented,
+        PanicCause::Todo,
+        PanicCause::PanicInDrop,
+        PanicCause::CannotUnwind,
+        PanicCause::FormattingError,
+        PanicCause::CapacityOverflow,
+        PanicCause::OutOfMemory,
+        PanicCause::StringSliceError,
+        PanicCause::InvalidEnum,
+        PanicCause::MisalignedPointer,
+        PanicCause::KeyNotFound,
+        PanicCause::AsyncFnResumed,
+    ];
+
+    println!(
+        "{:<8} {:<20} {:<40} {}",
+        "Code", "ID", "Description", "Docs"
+    );
+    println!("{}", "-".repeat(100));
+    for cause in &causes {
+        println!(
+            "{:<8} {:<20} {:<40} {}",
+            cause.error_code(),
+            cause.id(),
+            cause.description(),
+            cause.docs_url()
+        );
+    }
+    println!();
+    println!("All three columns (code, ID, description) are valid in allow/deny rules.");
+    println!(
+        "The parent ID 'overflow' matches all overflow variants (arithmetic, div, rem, shift)."
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -571,17 +708,11 @@ mod tests {
 
     #[test]
     fn test_panic_cause_description() {
-        assert_eq!(
-            PanicCause::ExplicitPanic.description(),
-            "explicit panic!() call"
-        );
-        assert_eq!(PanicCause::BoundsCheck.description(), "index out of bounds");
-        assert_eq!(PanicCause::Unwrap.description(), "unwrap() failed");
-        assert_eq!(PanicCause::Todo.description(), "todo!() reached");
-        assert_eq!(
-            PanicCause::Unreachable.description(),
-            "unreachable!() reached"
-        );
+        assert_eq!(PanicCause::ExplicitPanic.description(), "explicit_panic");
+        assert_eq!(PanicCause::BoundsCheck.description(), "index_out_of_bounds");
+        assert_eq!(PanicCause::Unwrap.description(), "unwrap_failed");
+        assert_eq!(PanicCause::Todo.description(), "todo_reached");
+        assert_eq!(PanicCause::Unreachable.description(), "unreachable_reached");
     }
 
     #[test]
@@ -602,8 +733,8 @@ mod tests {
 
     #[test]
     fn test_unwrap_expect_description() {
-        assert_eq!(PanicCause::Unwrap.description(), "unwrap() failed");
-        assert_eq!(PanicCause::Expect.description(), "expect() failed");
+        assert_eq!(PanicCause::Unwrap.description(), "unwrap_failed");
+        assert_eq!(PanicCause::Expect.description(), "expect_failed");
     }
 
     #[test]
@@ -982,7 +1113,7 @@ mod tests {
         );
         assert_eq!(
             PanicCause::ShiftOverflow("left").docs_slug(),
-            "JP004-shift-overflow"
+            "JP003-arithmetic-overflow"
         );
         assert_eq!(
             PanicCause::DivisionByZero.docs_slug(),

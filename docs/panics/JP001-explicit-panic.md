@@ -71,7 +71,7 @@ fn process_data(data: &[u8]) {
 ## Jonesy Output
 
 ```text
- --> src/lib.rs:5:9 [explicit panic!() call]
+ --> src/lib.rs:5:9 [JP001/panic: explicit_panic]
      = help: Review if panic is intentional or add error handling
 ```
 

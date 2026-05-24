@@ -40,12 +40,12 @@ Jonesy detects and classifies panics with unique error codes. Click on any code 
 | [JP001](/panics/JP001-explicit-panic) | Explicit Panic | Direct `panic!()` macro call |
 | [JP002](/panics/JP002-bounds-check) | Bounds Check | Index out of bounds |
 | [JP003](/panics/JP003-arithmetic-overflow) | Arithmetic Overflow | Integer overflow in arithmetic |
-| [JP004](/panics/JP004-shift-overflow) | Shift Overflow | Bit shift by too many positions |
+| [JP003](/panics/JP004-shift-overflow) | Shift Overflow | Bit shift by too many positions (now part of JP003 overflow family) |
 | [JP005](/panics/JP005-division-by-zero) | Division by Zero | Division or remainder by zero |
 | [JP006](/panics/JP006-unwrap-none) | Unwrap None | `unwrap()` on `Option::None` |
-| [JP007](/panics/JP007-unwrap-err) | Unwrap Err | `unwrap()` on `Result::Err` |
+| [JP006](/panics/JP007-unwrap-err) | Unwrap Err | `unwrap()` on `Result::Err` (previously JP007, now JP006) |
 | [JP008](/panics/JP008-expect-none) | Expect None | `expect()` on `Option::None` |
-| [JP009](/panics/JP009-expect-err) | Expect Err | `expect()` on `Result::Err` |
+| [JP008](/panics/JP009-expect-err) | Expect Err | `expect()` on `Result::Err` (previously JP009, now JP008) |
 | [JP010](/panics/JP010-assert-failed) | Assert Failed | `assert!()` / `debug_assert!()` condition false |
 | [JP012](/panics/JP012-unreachable) | Unreachable | `unreachable!()` macro reached |
 | [JP013](/panics/JP013-unimplemented) | Unimplemented | `unimplemented!()` macro reached |
