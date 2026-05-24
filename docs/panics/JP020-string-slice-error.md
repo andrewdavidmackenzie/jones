@@ -90,7 +90,7 @@ fn process_ascii(s: &str) -> Result<(), Error> {
 ## Jonesy Output
 
 ```text
- --> src/lib.rs:2:5 [string/slice error]
+ --> src/lib.rs:2:5 [JP020/str_slice: string_slice_error]
      = help: Use .get() or .chars() for safe string indexing
 ```
 

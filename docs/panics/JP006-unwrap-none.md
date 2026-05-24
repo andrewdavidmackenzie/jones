@@ -100,11 +100,11 @@ fn get_cached() -> &Value {
 ## Jonesy Output
 
 ```text
- --> src/lib.rs:3:10 [unwrap() on None]
+ --> src/lib.rs:3:10 [JP006/unwrap: unwrap_failed]
      = help: Use if let, match, unwrap_or, or ? operator instead
 ```
 
 ## Related
 
-- [JP007 - Unwrap Err](/panics/JP007-unwrap-err): `unwrap()` on `Result::Err`
+- [JP006 - Unwrap Err](/panics/JP007-unwrap-err): `unwrap()` on `Result::Err` (previously JP007)
 - [JP008 - Expect None](/panics/JP008-expect-none): `expect()` on `None`

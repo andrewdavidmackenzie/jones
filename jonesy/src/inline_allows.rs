@@ -94,6 +94,14 @@ pub fn check_inline_allow(
                 if causes.contains("*") || causes.contains(cause_id) {
                     return true;
                 }
+                // Check if any cause in the comment normalises to the same canonical ID
+                for c in &causes {
+                    if let Some(canonical) = crate::panic_cause::PanicCause::normalise_id(c) {
+                        if canonical == cause_id {
+                            return true;
+                        }
+                    }
+                }
             }
         }
     }

@@ -89,7 +89,7 @@ impl Drop for Resource {
 ## Jonesy Output
 
 ```text
- --> src/lib.rs:8:9 [panic during drop]
+ --> src/lib.rs:8:9 [JP015/drop: panic_during_drop]
      = help: Avoid panicking in Drop - log errors instead
 ```
 

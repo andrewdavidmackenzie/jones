@@ -67,7 +67,7 @@ fn allocate_matrix(rows: usize, cols: usize) -> Result<Vec<Vec<i32>>, Error> {
 ## Jonesy Output
 
 ```text
- --> src/lib.rs:3:5 [capacity overflow]
+ --> src/lib.rs:3:5 [JP018/capacity: capacity_overflow]
      = help: Validate collection sizes and use try_reserve
 ```
 

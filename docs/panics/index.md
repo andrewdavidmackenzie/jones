@@ -25,14 +25,14 @@ Panics intentionally triggered by the programmer:
 ### Option/Result Handling
 Panics from improper error handling:
 - [JP006 - Unwrap None](/panics/JP006-unwrap-none): `unwrap()` on `None`
-- [JP007 - Unwrap Err](/panics/JP007-unwrap-err): `unwrap()` on `Err`
+- [JP006 - Unwrap Err](/panics/JP007-unwrap-err): `unwrap()` on `Err` (previously JP007, now JP006)
 - [JP008 - Expect None](/panics/JP008-expect-none): `expect()` on `None`
-- [JP009 - Expect Err](/panics/JP009-expect-err): `expect()` on `Err`
+- [JP008 - Expect Err](/panics/JP009-expect-err): `expect()` on `Err` (previously JP009, now JP008)
 
 ### Numeric Operations
 Panics from arithmetic and bit operations:
 - [JP003 - Arithmetic Overflow](/panics/JP003-arithmetic-overflow): Integer overflow
-- [JP004 - Shift Overflow](/panics/JP004-shift-overflow): Invalid bit shift
+- [JP003 - Shift Overflow](/panics/JP004-shift-overflow): Invalid bit shift (now part of JP003 overflow family)
 - [JP005 - Division by Zero](/panics/JP005-division-by-zero): Divide by zero
 
 ### Memory and Indexing

@@ -1,9 +1,11 @@
 ---
 layout: default
-title: "JP007: Unwrap Err"
+title: "JP006: Unwrap Err"
 ---
 
-# JP007: Unwrap Err
+# JP006: Unwrap Err
+
+> **Note**: `unwrap()` on `Err` was previously JP007. It is now reported under JP006, as `[JP006/unwrap: unwrap_failed]`.
 
 **Severity**: High
 **Category**: Option/Result Handling
@@ -16,7 +18,7 @@ Calling `.unwrap()` on a `Result` that contains an `Err` variant.
 
 ```rust
 fn read_config() -> Config {
-    let content = std::fs::read_to_string("config.toml").unwrap();  // JP007
+    let content = std::fs::read_to_string("config.toml").unwrap();  // JP006
     parse_config(&content)
 }
 ```
@@ -69,11 +71,11 @@ let content = std::fs::read_to_string("config.toml").ok();
 ## Jonesy Output
 
 ```text
- --> src/lib.rs:2:16 [unwrap() on Err]
+ --> src/lib.rs:2:16 [JP006/unwrap: unwrap_failed]
      = help: Use if let, match, unwrap_or, or ? operator instead
 ```
 
 ## Related
 
 - [JP006 - Unwrap None](/panics/JP006-unwrap-none): `unwrap()` on `Option::None`
-- [JP009 - Expect Err](/panics/JP009-expect-err): `expect()` on `Err`
+- [JP008 - Expect Err](/panics/JP009-expect-err): `expect()` on `Err` (previously JP009)

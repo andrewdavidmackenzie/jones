@@ -89,12 +89,12 @@ overflow-checks = true
 ## Jonesy Output
 
 ```text
- --> src/lib.rs:3:5 [arithmetic overflow]
+ --> src/lib.rs:3:5 [JP003/overflow: arithmetic_overflow]
      = help: Use checked_*, saturating_*, or wrapping_* methods
      = warning: With default release settings (overflow-checks=false), this wraps silently
 ```
 
 ## Related
 
-- [JP004 - Shift Overflow](/panics/JP004-shift-overflow): Bit shift overflow
+- [JP003 - Shift Overflow](/panics/JP004-shift-overflow): Bit shift overflow (now part of the JP003 overflow family)
 - [JP005 - Division by Zero](/panics/JP005-division-by-zero): Division edge case

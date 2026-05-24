@@ -304,7 +304,7 @@ Causes are displayed only on **leaf nodes** (the actual user code lines that lea
 
 ```text
 Panic code points in crate:
- --> examples/array_access/src/main.rs:14:1 [index out of bounds]
+ --> examples/array_access/src/main.rs:14:1 [JP002/bounds: index_out_of_bounds]
      = help: Use .get() for safe access or validate index before use
 ```
 
@@ -338,4 +338,4 @@ The panic cause detection is implemented in `jones/src/panic_cause.rs`:
 
 - **Symbol availability**: Cause detection requires function names to be present in the binary. Release builds with stripped symbols may not have these helper function names visible.
 - **Inlining**: Aggressive inlining in release builds may eliminate the panic helper functions, making cause detection less accurate.
-- **Option vs Result**: Currently `unwrap_failed` is reported as "unwrap() on None" even though it could be from `Result::unwrap()`. Both use the same internal helper.
+- **Option vs Result**: Both `Option::unwrap()` and `Result::unwrap()` use the same internal `unwrap_failed` helper, so they are both reported as `[JP006/unwrap: unwrap_failed]`.

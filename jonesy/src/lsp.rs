@@ -85,7 +85,7 @@ impl JonesyLspServer {
         } else {
             let descriptions: Vec<_> = sorted_causes
                 .iter()
-                .map(|c| format!("{}: {}", c.error_code(), c.description()))
+                .map(|c| format!("{}/{}: {}", c.error_code(), c.id(), c.description()))
                 .collect();
             let primary = sorted_causes[0];
             (

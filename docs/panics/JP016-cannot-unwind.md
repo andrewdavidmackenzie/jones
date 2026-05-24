@@ -84,7 +84,7 @@ pub extern "C-unwind" fn may_panic() {
 ## Jonesy Output
 
 ```text
- --> src/ffi.rs:5:5 [panic in no-unwind context]
+ --> src/ffi.rs:5:5 [JP016/unwind: panic_in_no_unwind_context]
      = help: Catch panics at FFI boundaries with catch_unwind
 ```
 
