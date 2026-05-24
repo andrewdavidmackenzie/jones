@@ -591,6 +591,8 @@ fn test_perfect_example() {
     let src_dir = example_dir.join("src");
 
     let markers = find_expected_panic_markers(&src_dir);
+    let raw_output = run_jonesy_raw_output(&example_dir, &["--no-hyperlinks"]);
+    eprintln!("jonesy stdout ({}):\n{}", example_dir.display(), raw_output);
     let (exit_code, detected) = run_jones_on_example(&example_dir);
 
     assert!(
@@ -599,7 +601,7 @@ fn test_perfect_example() {
     );
     assert!(
         detected.is_empty(),
-        "Perfect example should have no detected panics"
+        "Perfect example should have no detected panics, but found: {detected:?}"
     );
     assert_eq!(
         exit_code, 0,
