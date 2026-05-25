@@ -336,6 +336,7 @@ fn bench_collect_crate_relationships(c: &mut Criterion) {
                     None,
                     None,
                     &project_context,
+                    Some(std::path::Path::new(project_context.project_root())),
                 );
                 black_box(points)
             })
