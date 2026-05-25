@@ -973,4 +973,75 @@ mod tests {
             None
         ));
     }
+
+    #[test]
+    fn test_report_unused_global_allow() {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let toml_path = dir.path().join("jonesy.toml");
+        let mut f = std::fs::File::create(&toml_path).unwrap();
+        writeln!(f, "allow = [\"unwrap\", \"bounds\", \"capacity\"]").unwrap();
+
+        let mut config = Config::with_defaults();
+        config.load_from_jones_toml(&toml_path);
+
+        // Only use "unwrap" — "bounds" and "capacity" should be unused
+        assert!(!config.is_denied(&PanicCause::Unwrap));
+
+        let unused = config.report_unused_rules();
+        assert_eq!(
+            unused, 2,
+            "Should report 2 unused global allows (bounds, capacity)"
+        );
+    }
+
+    #[test]
+    fn test_report_unused_scoped_rule() {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let toml_path = dir.path().join("jonesy.toml");
+        let mut f = std::fs::File::create(&toml_path).unwrap();
+        writeln!(
+            f,
+            "[[rules]]\nfunction = \"my_crate::*\"\nallow = [\"unwrap\"]\n\n\
+             [[rules]]\nfunction = \"other_crate::*\"\nallow = [\"expect\"]"
+        )
+        .unwrap();
+
+        let mut config = Config::with_defaults();
+        config.load_from_jones_toml(&toml_path);
+
+        // Use first rule but not second
+        assert!(!config.is_denied_at(
+            &PanicCause::Unwrap,
+            Some("src/main.rs"),
+            Some("my_crate::foo")
+        ));
+
+        let unused = config.report_unused_rules();
+        assert_eq!(
+            unused, 1,
+            "Should report 1 unused scoped rule (other_crate)"
+        );
+    }
+
+    #[test]
+    fn test_no_unused_when_all_used() {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let toml_path = dir.path().join("jonesy.toml");
+        let mut f = std::fs::File::create(&toml_path).unwrap();
+        writeln!(f, "allow = [\"unwrap\"]").unwrap();
+
+        let mut config = Config::with_defaults();
+        config.load_from_jones_toml(&toml_path);
+
+        assert!(!config.is_denied(&PanicCause::Unwrap));
+
+        let unused = config.report_unused_rules();
+        assert_eq!(unused, 0, "All rules are used");
+    }
 }

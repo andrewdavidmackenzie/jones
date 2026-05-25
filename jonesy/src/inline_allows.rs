@@ -503,4 +503,38 @@ fn foo() {
         // Line 10 should match via previous line with wildcard
         assert!(is_allowed_by_inline(&allows, "test.rs", 10, "anything"));
     }
+
+    #[test]
+    fn test_find_unused_inline_allows() {
+        let dir = tempfile::tempdir().unwrap();
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(
+            src_dir.join("main.rs"),
+            "fn main() {\n    // jonesy:allow(unwrap)\n    foo();\n    // jonesy:allow(bounds)\n    bar();\n}\n",
+        ).unwrap();
+
+        // Only line 3 had a panic detected (matching the allow on line 2)
+        let mut reported = HashSet::new();
+        reported.insert((src_dir.join("main.rs").to_string_lossy().to_string(), 3));
+
+        let unused = find_unused_inline_allows(dir.path(), &reported);
+        assert_eq!(unused.len(), 1, "One unused allow (bounds on line 4)");
+        assert_eq!(unused[0].1, 4);
+        assert!(unused[0].2.contains("bounds"));
+    }
+
+    #[test]
+    fn test_find_unused_all_used() {
+        let dir = tempfile::tempdir().unwrap();
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(src_dir.join("lib.rs"), "// jonesy:allow(unwrap)\nfoo();\n").unwrap();
+
+        let mut reported = HashSet::new();
+        reported.insert((src_dir.join("lib.rs").to_string_lossy().to_string(), 2));
+
+        let unused = find_unused_inline_allows(dir.path(), &reported);
+        assert!(unused.is_empty(), "All allows used");
+    }
 }
