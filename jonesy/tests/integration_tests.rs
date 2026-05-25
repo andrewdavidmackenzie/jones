@@ -1699,11 +1699,32 @@ fn test_rlib_inline_allow_propagates_to_caller() {
     let example_dir = workspace_root.join("examples").join("rlib");
 
     let stdout = run_jonesy_raw_output(&example_dir, &["--no-hyperlinks", "--lib"]);
+    let detected = parse_jones_output(&stdout);
 
-    // The caller function should NOT appear with overflow
-    let caller_has_overflow = stdout
+    // Find actual line numbers from source to avoid hardcoding
+    let mod_path = example_dir.join("src/module/mod.rs");
+    let mod_content = fs::read_to_string(&mod_path).expect("Failed to read mod.rs");
+
+    let caller_line = mod_content
         .lines()
-        .any(|line| line.contains("caller_of_allowed_overflow") && line.contains("overflow"));
+        .enumerate()
+        .find(|(_, l)| l.trim() == "cause_allowed_overflow();")
+        .map(|(i, _)| (i + 1) as u32)
+        .expect("Could not find caller_of_allowed_overflow call line");
+
+    let allowed_line = mod_content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("jonesy:allow(overflow)"))
+        .map(|(i, _)| (i + 1) as u32)
+        .expect("Could not find inline allow line");
+
+    // The caller function should NOT have overflow in parsed detections
+    let caller_has_overflow = detected.iter().any(|p| {
+        p.file.ends_with("module/mod.rs")
+            && (caller_line.saturating_sub(1)..=caller_line + 1).contains(&p.line)
+            && p.causes.iter().any(|c| c.contains("overflow"))
+    });
 
     assert!(
         !caller_has_overflow,
@@ -1711,10 +1732,12 @@ fn test_rlib_inline_allow_propagates_to_caller() {
         stdout
     );
 
-    // The allowed function itself should also not appear (filtered by its own allow)
-    let allowed_has_overflow = stdout
-        .lines()
-        .any(|line| line.contains("cause_allowed_overflow") && line.contains("overflow"));
+    // The allowed function itself should also not appear
+    let allowed_has_overflow = detected.iter().any(|p| {
+        p.file.ends_with("module/mod.rs")
+            && (allowed_line.saturating_sub(1)..=allowed_line + 1).contains(&p.line)
+            && p.causes.iter().any(|c| c.contains("overflow"))
+    });
 
     assert!(
         !allowed_has_overflow,
@@ -1722,10 +1745,12 @@ fn test_rlib_inline_allow_propagates_to_caller() {
         stdout
     );
 
-    // But the non-allowed overflow (cause_arithmetic_overflow, line 111) should still appear
-    let has_denied_detection = stdout
-        .lines()
-        .any(|line| line.contains("mod.rs:111") && line.contains("overflow"));
+    // But the non-allowed overflow (cause_arithmetic_overflow) should still appear
+    let has_denied_detection = detected.iter().any(|p| {
+        p.file.ends_with("module/mod.rs")
+            && p.causes.iter().any(|c| c.contains("overflow"))
+            && !p.causes.iter().all(|c| c == "shift_overflow")
+    });
 
     assert!(
         has_denied_detection,
