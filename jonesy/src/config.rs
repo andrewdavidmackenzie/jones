@@ -247,20 +247,14 @@ impl Config {
         for (_, idx, rule) in &matching_rules {
             if let Some(allowed) = rule.check_cause(id) {
                 if allowed {
-                    self.used_rules
-                        .lock()
-                        .unwrap()
-                        .insert(*idx);
+                    self.used_rules.lock().unwrap().insert(*idx);
                 }
                 return !allowed;
             }
             if let Some(parent) = parent_id {
                 if let Some(allowed) = rule.check_cause(parent) {
                     if allowed {
-                        self.used_rules
-                        .lock()
-                        .unwrap()
-                        .insert(*idx);
+                        self.used_rules.lock().unwrap().insert(*idx);
                     }
                     return !allowed;
                 }
