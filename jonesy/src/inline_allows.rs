@@ -94,10 +94,19 @@ pub fn check_inline_allow(
                 if causes.contains("*") || causes.contains(cause_id) {
                     return true;
                 }
-                // Check if any cause in the comment normalises to the same canonical ID
                 for c in &causes {
                     if let Some(canonical) = crate::panic_cause::PanicCause::normalise_id(c) {
                         if canonical == cause_id {
+                            return true;
+                        }
+                        // Parent ID matching: "overflow" in comment matches
+                        // "div_overflow", "rem_overflow", "shift_overflow"
+                        if canonical == "overflow"
+                            && matches!(
+                                cause_id,
+                                "overflow" | "div_overflow" | "rem_overflow" | "shift_overflow"
+                            )
+                        {
                             return true;
                         }
                     }
