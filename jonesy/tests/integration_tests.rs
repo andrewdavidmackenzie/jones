@@ -1689,6 +1689,51 @@ fn test_rlib_inline_allow() {
     );
 }
 
+/// Test that inline allow propagates to callers within the same crate.
+/// `cause_allowed_overflow` has `// jonesy:allow(overflow)`.
+/// `caller_of_allowed_overflow` calls it and should NOT be flagged for overflow.
+#[test]
+fn test_rlib_inline_allow_propagates_to_caller() {
+    setup();
+    let workspace_root = find_workspace_root();
+    let example_dir = workspace_root.join("examples").join("rlib");
+
+    let stdout = run_jonesy_raw_output(&example_dir, &["--no-hyperlinks", "--lib"]);
+
+    // The caller function should NOT appear with overflow
+    let caller_has_overflow = stdout
+        .lines()
+        .any(|line| line.contains("caller_of_allowed_overflow") && line.contains("overflow"));
+
+    assert!(
+        !caller_has_overflow,
+        "caller_of_allowed_overflow should NOT be flagged for overflow — the callee's inline allow should propagate.\nOutput:\n{}",
+        stdout
+    );
+
+    // The allowed function itself should also not appear (filtered by its own allow)
+    let allowed_has_overflow = stdout
+        .lines()
+        .any(|line| line.contains("cause_allowed_overflow") && line.contains("overflow"));
+
+    assert!(
+        !allowed_has_overflow,
+        "cause_allowed_overflow should be suppressed by its inline allow.\nOutput:\n{}",
+        stdout
+    );
+
+    // But the non-allowed overflow (cause_arithmetic_overflow, line 111) should still appear
+    let has_denied_detection = stdout
+        .lines()
+        .any(|line| line.contains("mod.rs:111") && line.contains("overflow"));
+
+    assert!(
+        has_denied_detection,
+        "cause_arithmetic_overflow (without inline allow) should still be detected.\nOutput:\n{}",
+        stdout
+    );
+}
+
 /// Test that parallel .rlib processing produces identical results to sequential processing.
 /// This verifies that the parallel .o file processing implementation is deterministic.
 #[test]
