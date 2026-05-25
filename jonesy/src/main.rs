@@ -185,6 +185,16 @@ fn analyze_package(parsed_args: &Args) -> Result<(), Box<dyn Error>> {
         generate_text_output(&result, tree, summary_only, no_hyperlinks);
     }
 
+    if parsed_args.report_unused_rules {
+        config.report_unused_rules();
+        let pre_filter_locs = jonesy::call_tree::take_pre_filter_locations();
+        let unused_comments =
+            jonesy::inline_allows::find_unused_inline_allows(&project_root, &pre_filter_locs);
+        for (file, line, causes) in &unused_comments {
+            eprintln!("Warning: Unused inline allow at {file}:{line} — jonesy:allow({causes})");
+        }
+    }
+
     // Exit with the number of panic points found (0 = passed, >0 = found panics)
     // Note: Unix exit codes are 8-bit (0-255), the values above wrap around
     std::process::exit(result.panic_points() as i32);
@@ -400,6 +410,17 @@ fn analyze_workspace(members: &[WorkspaceMember], args: &Args) -> Result<(), Box
             workspace_summary.panic_points(),
             members.len()
         );
+    }
+
+    if args.report_unused_rules {
+        // Report unused config rules (uses last member's config — workspace shares one)
+        // TODO: track config per member for more precise reporting
+        let pre_filter_locs = jonesy::call_tree::take_pre_filter_locations();
+        let unused_comments =
+            jonesy::inline_allows::find_unused_inline_allows(&workspace_root, &pre_filter_locs);
+        for (file, line, causes) in &unused_comments {
+            eprintln!("Warning: Unused inline allow at {file}:{line} — jonesy:allow({causes})");
+        }
     }
 
     // Exit with the number of panic points found
