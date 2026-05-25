@@ -154,6 +154,10 @@ fn analyze_package(parsed_args: &Args) -> Result<(), Box<dyn Error>> {
         }
     }
 
+    if parsed_args.direct_only {
+        all_code_points.retain(|p| p.is_direct_panic);
+    }
+
     // Create the unified analysis result
     let result = AnalysisResult::new(
         project_name.unwrap_or_else(|| "unknown".to_string()),
@@ -316,6 +320,10 @@ fn analyze_workspace(members: &[WorkspaceMember], args: &Args) -> Result<(), Box
             }
             member_summary.add(&result.summary);
             merge_code_points(&mut result, &mut seen_code_points, &mut member_code_points);
+        }
+
+        if args.direct_only {
+            member_code_points.retain(|p| p.is_direct_panic);
         }
 
         // For text output, print immediately; for JSON/HTML, collect for later
