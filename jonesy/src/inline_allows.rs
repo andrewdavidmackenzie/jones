@@ -200,6 +200,65 @@ fn parse_line_allows(line: &str) -> Option<HashSet<String>> {
     }
 }
 
+/// Scan all source files under `root` for `// jonesy:allow(...)` comments and report
+/// any that are not near a reported panic point. An inline allow is "used" if a panic
+/// point was found (before filtering) at the same line or the line after the comment.
+///
+/// `reported_locations` should contain `(file, line)` pairs of all panic points that
+/// were detected BEFORE allow filtering (i.e., the raw detections).
+pub fn find_unused_inline_allows(
+    root: &Path,
+    reported_locations: &HashSet<(String, u32)>,
+) -> Vec<(String, u32, String)> {
+    let mut unused = Vec::new();
+
+    fn visit_rs_files(
+        dir: &Path,
+        unused: &mut Vec<(String, u32, String)>,
+        reported: &HashSet<(String, u32)>,
+    ) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if path.file_name().is_some_and(|n| n != "target") {
+                    visit_rs_files(&path, unused, reported);
+                }
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    let file_str = path.to_string_lossy().to_string();
+                    for (idx, line) in content.lines().enumerate() {
+                        if let Some(causes) = parse_line_allows(line) {
+                            let comment_line = (idx + 1) as u32;
+                            let causes_str = causes.iter().cloned().collect::<Vec<_>>().join(", ");
+                            // An allow comment is "used" if a panic was reported on the
+                            // same line or the line immediately after
+                            let is_used = reported.iter().any(|(f, l)| {
+                                (f.ends_with(&file_str) || file_str.ends_with(f.as_str()))
+                                    && (*l == comment_line || *l == comment_line + 1)
+                            });
+                            if !is_used {
+                                let rel_path = path
+                                    .strip_prefix(std::env::current_dir().unwrap_or_default())
+                                    .unwrap_or(&path)
+                                    .to_string_lossy()
+                                    .to_string();
+                                unused.push((rel_path, comment_line, causes_str));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    visit_rs_files(root, &mut unused, reported_locations);
+    unused.sort_by(|a, b| (&a.0, a.1).cmp(&(&b.0, b.1)));
+    unused
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -443,5 +502,39 @@ fn foo() {
 
         // Line 10 should match via previous line with wildcard
         assert!(is_allowed_by_inline(&allows, "test.rs", 10, "anything"));
+    }
+
+    #[test]
+    fn test_find_unused_inline_allows() {
+        let dir = tempfile::tempdir().unwrap();
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(
+            src_dir.join("main.rs"),
+            "fn main() {\n    // jonesy:allow(unwrap)\n    foo();\n    // jonesy:allow(bounds)\n    bar();\n}\n",
+        ).unwrap();
+
+        // Only line 3 had a panic detected (matching the allow on line 2)
+        let mut reported = HashSet::new();
+        reported.insert((src_dir.join("main.rs").to_string_lossy().to_string(), 3));
+
+        let unused = find_unused_inline_allows(dir.path(), &reported);
+        assert_eq!(unused.len(), 1, "One unused allow (bounds on line 4)");
+        assert_eq!(unused[0].1, 4);
+        assert!(unused[0].2.contains("bounds"));
+    }
+
+    #[test]
+    fn test_find_unused_all_used() {
+        let dir = tempfile::tempdir().unwrap();
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(src_dir.join("lib.rs"), "// jonesy:allow(unwrap)\nfoo();\n").unwrap();
+
+        let mut reported = HashSet::new();
+        reported.insert((src_dir.join("lib.rs").to_string_lossy().to_string(), 2));
+
+        let unused = find_unused_inline_allows(dir.path(), &reported);
+        assert!(unused.is_empty(), "All allows used");
     }
 }

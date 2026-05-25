@@ -13,6 +13,22 @@ use dashmap::DashSet;
 use rayon::prelude::*;
 use rustc_demangle::demangle;
 use std::collections::{HashMap, HashSet};
+use std::sync::{LazyLock, Mutex};
+
+static PRE_FILTER_LOCATIONS: LazyLock<Mutex<HashSet<(String, u32)>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+/// Get pre-filter locations collected during analysis, then clear the store.
+pub fn take_pre_filter_locations() -> HashSet<(String, u32)> {
+    std::mem::take(&mut *PRE_FILTER_LOCATIONS.lock().unwrap())
+}
+
+fn collect_locations(points: &[CrateCodePoint], locations: &mut HashSet<(String, u32)>) {
+    for p in points {
+        locations.insert((p.file.clone(), p.line));
+        collect_locations(&p.children, locations);
+    }
+}
 use std::sync::Arc;
 
 /// A node in the call tree representing a function that can lead to the target symbol
@@ -454,10 +470,11 @@ pub fn collect_crate_code_points(
 ) -> (Vec<CrateCodePoint>, AnalysisSummary) {
     let mut roots = collect_crate_code_points_hierarchical(node, project_context);
 
-    // Assign Unknown cause to leaf points without identified causes
     assign_unknown_causes(&mut roots);
 
-    // Filter out code points with allowed causes
+    // Collect pre-filter locations for unused-rule detection
+    collect_locations(&roots, &mut *PRE_FILTER_LOCATIONS.lock().unwrap());
+
     filter_allowed_causes(&mut roots, config, project_context);
 
     // Deduplicate roots by (file, line)

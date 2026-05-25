@@ -124,7 +124,7 @@ struct TomlScopedRule {
 }
 
 /// Configuration for which panic causes to allow or deny.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Config {
     /// Panic cause IDs that are allowed globally (not reported)
     allowed: HashSet<String>,
@@ -132,6 +132,10 @@ pub struct Config {
     denied: HashSet<String>,
     /// Scoped rules for path/function-specific allow/deny
     rules: Vec<ScopedRule>,
+    /// Track which global allow entries were used during filtering
+    used_global_allows: std::sync::Mutex<HashSet<String>>,
+    /// Track which scoped rules (by index) were used during filtering
+    used_rules: std::sync::Mutex<HashSet<usize>>,
 }
 
 /// TOML configuration structure for jonesy
@@ -189,6 +193,8 @@ impl Config {
             allowed,
             denied: HashSet::new(),
             rules: Vec::new(),
+            used_global_allows: std::sync::Mutex::new(HashSet::new()),
+            used_rules: std::sync::Mutex::new(HashSet::new()),
         }
     }
 
@@ -238,22 +244,24 @@ impl Config {
         let parent_id = cause.parent_id();
 
         // Check scoped rules in order of specificity
-        for (_, _, rule) in matching_rules {
-            // Check specific ID first, then parent ID
+        for (_, idx, rule) in &matching_rules {
             if let Some(allowed) = rule.check_cause(id) {
+                if allowed {
+                    self.used_rules.lock().unwrap().insert(*idx);
+                }
                 return !allowed;
             }
             if let Some(parent) = parent_id {
                 if let Some(allowed) = rule.check_cause(parent) {
+                    if allowed {
+                        self.used_rules.lock().unwrap().insert(*idx);
+                    }
                     return !allowed;
                 }
             }
         }
 
         // Fall back to global rules
-        // Check explicit entries first, then wildcards (same priority as scoped rules)
-
-        // Explicit deny takes precedence (check specific first, then parent)
         if self.denied.contains(id) {
             return true;
         }
@@ -263,26 +271,70 @@ impl Config {
             }
         }
 
-        // An explicit "allow" means not denied (check specific first, then parent)
         if self.allowed.contains(id) {
+            self.used_global_allows
+                .lock()
+                .unwrap()
+                .insert(id.to_string());
             return false;
         }
         if let Some(parent) = parent_id {
             if self.allowed.contains(parent) {
+                self.used_global_allows
+                    .lock()
+                    .unwrap()
+                    .insert(parent.to_string());
                 return false;
             }
         }
 
-        // Then check global wildcards
         if self.denied.contains("*") {
             return true;
         }
         if self.allowed.contains("*") {
+            self.used_global_allows
+                .lock()
+                .unwrap()
+                .insert("*".to_string());
             return false;
         }
 
         // Default: deny (report) unless explicitly allowed
         true
+    }
+
+    /// Report unused config rules to stderr.
+    /// Returns the number of unused rules found.
+    pub fn report_unused_rules(&self) -> usize {
+        let mut count = 0;
+        let used_allows = self.used_global_allows.lock().unwrap();
+        let used_rules = self.used_rules.lock().unwrap();
+
+        // Check global allows (skip defaults "drop" and "unwind")
+        let defaults: HashSet<&str> = ["drop", "unwind"].into_iter().collect();
+        for id in &self.allowed {
+            if !defaults.contains(id.as_str()) && !used_allows.contains(id) {
+                eprintln!("Warning: Unused global allow '{id}' in config");
+                count += 1;
+            }
+        }
+
+        // Check scoped rules
+        for (idx, rule) in self.rules.iter().enumerate() {
+            if !used_rules.contains(&idx) {
+                let selector = match (&rule.path, &rule.function) {
+                    (Some(p), Some(f)) => format!("path='{}', function='{}'", p, f),
+                    (Some(p), None) => format!("path='{}'", p),
+                    (None, Some(f)) => format!("function='{}'", f),
+                    (None, None) => "global".to_string(),
+                };
+                let causes: Vec<_> = rule.allowed.iter().collect();
+                eprintln!("Warning: Unused scoped rule ({selector}) with allow = {causes:?}");
+                count += 1;
+            }
+        }
+
+        count
     }
 
     /// Apply a TOML configuration, overriding current settings.
@@ -920,5 +972,76 @@ mod tests {
             Some("src/main.rs"),
             None
         ));
+    }
+
+    #[test]
+    fn test_report_unused_global_allow() {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let toml_path = dir.path().join("jonesy.toml");
+        let mut f = std::fs::File::create(&toml_path).unwrap();
+        writeln!(f, "allow = [\"unwrap\", \"bounds\", \"capacity\"]").unwrap();
+
+        let mut config = Config::with_defaults();
+        config.load_from_jones_toml(&toml_path);
+
+        // Only use "unwrap" — "bounds" and "capacity" should be unused
+        assert!(!config.is_denied(&PanicCause::Unwrap));
+
+        let unused = config.report_unused_rules();
+        assert_eq!(
+            unused, 2,
+            "Should report 2 unused global allows (bounds, capacity)"
+        );
+    }
+
+    #[test]
+    fn test_report_unused_scoped_rule() {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let toml_path = dir.path().join("jonesy.toml");
+        let mut f = std::fs::File::create(&toml_path).unwrap();
+        writeln!(
+            f,
+            "[[rules]]\nfunction = \"my_crate::*\"\nallow = [\"unwrap\"]\n\n\
+             [[rules]]\nfunction = \"other_crate::*\"\nallow = [\"expect\"]"
+        )
+        .unwrap();
+
+        let mut config = Config::with_defaults();
+        config.load_from_jones_toml(&toml_path);
+
+        // Use first rule but not second
+        assert!(!config.is_denied_at(
+            &PanicCause::Unwrap,
+            Some("src/main.rs"),
+            Some("my_crate::foo")
+        ));
+
+        let unused = config.report_unused_rules();
+        assert_eq!(
+            unused, 1,
+            "Should report 1 unused scoped rule (other_crate)"
+        );
+    }
+
+    #[test]
+    fn test_no_unused_when_all_used() {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let toml_path = dir.path().join("jonesy.toml");
+        let mut f = std::fs::File::create(&toml_path).unwrap();
+        writeln!(f, "allow = [\"unwrap\"]").unwrap();
+
+        let mut config = Config::with_defaults();
+        config.load_from_jones_toml(&toml_path);
+
+        assert!(!config.is_denied(&PanicCause::Unwrap));
+
+        let unused = config.report_unused_rules();
+        assert_eq!(unused, 0, "All rules are used");
     }
 }
