@@ -279,11 +279,18 @@ pub fn collect_crate_code_points_hierarchical(
     node: &CallTreeNode,
     project_context: &ProjectContext,
 ) -> Vec<CrateCodePoint> {
-    // First pass: collect all crate code points and their relationships
-    // Map: (file, line) -> (name, cause, set of child keys)
     let mut points: CodePointMap = CodePointMap::new();
+    let workspace_root = Some(std::path::Path::new(project_context.project_root()));
 
-    collect_crate_relationships(node, &mut points, None, None, None, project_context);
+    collect_crate_relationships(
+        node,
+        &mut points,
+        None,
+        None,
+        None,
+        project_context,
+        workspace_root,
+    );
 
     // All crate code points should be reported as roots.
     // Each point that can lead to a panic deserves its own entry,
@@ -376,8 +383,9 @@ pub fn collect_crate_relationships(
     points: &mut CodePointMap,
     child_crate_key: Option<CodePointKey>,
     current_cause: Option<PanicCause>,
-    immediate_callee: Option<&str>, // Name of function this node calls (toward panic)
+    immediate_callee: Option<&str>,
     project_context: &ProjectContext,
+    workspace_root: Option<&std::path::Path>,
 ) {
     // Try to detect panic cause from this node's function name
     let detected_cause = detect_panic_cause(&node.name).or(current_cause);
@@ -445,6 +453,20 @@ pub fn collect_crate_relationships(
 
     // When recursing to callers, the current node becomes the child
     // (since callers are further from panic, they are parents in our hierarchy)
+    // If this crate code point has an inline allow for the detected cause,
+    // don't propagate that cause to callers — the allow at this point
+    // covers the entire call subtree within the same crate.
+    let propagated_cause = if let (Some(key), Some(cause)) = (&node_key, &detected_cause) {
+        let cause_id = cause.id();
+        if crate::inline_allows::check_inline_allow(&key.0, key.1, cause_id, workspace_root) {
+            None
+        } else {
+            detected_cause.clone()
+        }
+    } else {
+        detected_cause.clone()
+    };
+
     let next_child = node_key.or(child_crate_key);
 
     for caller in &node.callers {
@@ -452,9 +474,10 @@ pub fn collect_crate_relationships(
             caller,
             points,
             next_child.clone(),
-            detected_cause.clone(),
+            propagated_cause.clone(),
             Some(&node.name),
             project_context,
+            workspace_root,
         );
     }
 }

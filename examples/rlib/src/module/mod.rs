@@ -124,6 +124,12 @@ pub fn cause_allowed_overflow() {
     let _ = x + 1; // jonesy:allow(overflow)
 }
 
+/// Calls cause_allowed_overflow() — should NOT be flagged for overflow
+/// because the callee has an inline allow that stops propagation.
+pub fn caller_of_allowed_overflow() {
+    cause_allowed_overflow();
+}
+
 #[allow(clippy::useless_vec)]
 // Known limitation: slice index detection is platform-specific (see issue #59)
 pub fn cause_slice_index_oob() {

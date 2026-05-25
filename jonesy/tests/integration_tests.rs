@@ -1689,6 +1689,76 @@ fn test_rlib_inline_allow() {
     );
 }
 
+/// Test that inline allow propagates to callers within the same crate.
+/// `cause_allowed_overflow` has `// jonesy:allow(overflow)`.
+/// `caller_of_allowed_overflow` calls it and should NOT be flagged for overflow.
+#[test]
+fn test_rlib_inline_allow_propagates_to_caller() {
+    setup();
+    let workspace_root = find_workspace_root();
+    let example_dir = workspace_root.join("examples").join("rlib");
+
+    let stdout = run_jonesy_raw_output(&example_dir, &["--no-hyperlinks", "--lib"]);
+    let detected = parse_jones_output(&stdout);
+
+    // Find actual line numbers from source to avoid hardcoding
+    let mod_path = example_dir.join("src/module/mod.rs");
+    let mod_content = fs::read_to_string(&mod_path).expect("Failed to read mod.rs");
+
+    let caller_line = mod_content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.trim() == "cause_allowed_overflow();")
+        .map(|(i, _)| (i + 1) as u32)
+        .expect("Could not find caller_of_allowed_overflow call line");
+
+    let allowed_line = mod_content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("jonesy:allow(overflow)"))
+        .map(|(i, _)| (i + 1) as u32)
+        .expect("Could not find inline allow line");
+
+    // The caller function should NOT have overflow in parsed detections
+    let caller_has_overflow = detected.iter().any(|p| {
+        p.file.ends_with("module/mod.rs")
+            && (caller_line.saturating_sub(1)..=caller_line + 1).contains(&p.line)
+            && p.causes.iter().any(|c| c.contains("overflow"))
+    });
+
+    assert!(
+        !caller_has_overflow,
+        "caller_of_allowed_overflow should NOT be flagged for overflow — the callee's inline allow should propagate.\nOutput:\n{}",
+        stdout
+    );
+
+    // The allowed function itself should also not appear
+    let allowed_has_overflow = detected.iter().any(|p| {
+        p.file.ends_with("module/mod.rs")
+            && (allowed_line.saturating_sub(1)..=allowed_line + 1).contains(&p.line)
+            && p.causes.iter().any(|c| c.contains("overflow"))
+    });
+
+    assert!(
+        !allowed_has_overflow,
+        "cause_allowed_overflow should be suppressed by its inline allow.\nOutput:\n{}",
+        stdout
+    );
+
+    // But the non-allowed overflow (cause_arithmetic_overflow) should still appear
+    let has_denied_detection = detected.iter().any(|p| {
+        p.file.ends_with("module/mod.rs")
+            && p.causes.iter().any(|c| c.contains("overflow"))
+            && !p.causes.iter().all(|c| c == "shift_overflow")
+    });
+
+    assert!(
+        has_denied_detection,
+        "cause_arithmetic_overflow (without inline allow) should still be detected.\nOutput:\n{}",
+        stdout
+    );
+}
+
 /// Test that parallel .rlib processing produces identical results to sequential processing.
 /// This verifies that the parallel .o file processing implementation is deterministic.
 #[test]
