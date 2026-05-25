@@ -25,6 +25,8 @@ pub struct Args {
     pub output: OutputFormat,
     /// Run in LSP server mode
     pub lsp_mode: bool,
+    /// Only show direct panics (user code directly calls panic-triggering function)
+    pub direct_only: bool,
 }
 
 /// The version of jonesy, read from Cargo.toml at compile time.
@@ -64,6 +66,7 @@ pub fn parse_args(args: &[String]) -> Result<Args, String> {
             config_path: None,
             output: OutputFormat::default(),
             lsp_mode: true,
+            direct_only: false,
         });
     }
 
@@ -73,6 +76,7 @@ pub fn parse_args(args: &[String]) -> Result<Args, String> {
     let show_timings = args.iter().any(|a| a == "--show-timings");
     let quiet = args.iter().any(|a| a == "--quiet");
     let no_hyperlinks = args.iter().any(|a| a == "--no-hyperlinks");
+    let direct_only = args.iter().any(|a| a == "--direct-only");
 
     // Parse --format option with validation
     let output = parse_output_format(args, show_tree, summary_only, quiet, no_hyperlinks)?;
@@ -94,6 +98,7 @@ pub fn parse_args(args: &[String]) -> Result<Args, String> {
                 && *a != "--show-timings"
                 && *a != "--quiet"
                 && *a != "--no-hyperlinks"
+                && *a != "--direct-only"
                 && *a != "--max-threads"
                 && *a != "--config"
                 && *a != "--format"
@@ -146,6 +151,7 @@ pub fn parse_args(args: &[String]) -> Result<Args, String> {
         config_path,
         output,
         lsp_mode: false,
+        direct_only,
     })
 }
 
@@ -246,6 +252,7 @@ fn usage() -> String {
          --show-timings     Show timing information for each analysis step\n  \
          --max-threads N    Maximum threads for parallel analysis (default: CPU count)\n  \
          --config <path>    Path to TOML config file for allow/deny rules\n  \
+         --direct-only      Only show panics where user code directly calls a panic function\n  \
          --no-hyperlinks    Disable terminal hyperlinks (use plain absolute paths)\n  \
          --format <fmt>     Output format: text (default), json, html\n  \
          --version, -V      Print version and exit",
@@ -1017,6 +1024,7 @@ mod tests {
             config_path: None,
             output: OutputFormat::default(),
             lsp_mode: false,
+            direct_only: false,
         };
 
         assert!(args.binaries.is_empty());
