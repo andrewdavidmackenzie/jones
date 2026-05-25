@@ -289,7 +289,10 @@ impl Config {
             return true;
         }
         if self.allowed.contains("*") {
-            self.used_global_allows.lock().unwrap().insert("*".to_string());
+            self.used_global_allows
+                .lock()
+                .unwrap()
+                .insert("*".to_string());
             return false;
         }
 
